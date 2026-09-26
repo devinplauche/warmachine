@@ -1263,64 +1263,64 @@
   "externalBackendSection.workingDirPlaceholder": {
     "defaultMessage": "/home/warmachine/workspace"
   },
-  "goosehintsModal.close": {
+  "warmachinehintsModal.close": {
     "defaultMessage": "बंद करें"
   },
-  "goosehintsModal.developer": {
+  "warmachinehintsModal.developer": {
     "defaultMessage": "डेवलपर"
   },
-  "goosehintsModal.dialogDescription": {
+  "warmachinehintsModal.dialogDescription": {
     "defaultMessage": "WarMachine के साथ संचार को बेहतर बनाने के लिए अपने प्रोजेक्ट के बारे में अतिरिक्त संदर्भ प्रदान करें"
   },
-  "goosehintsModal.dialogTitle": {
+  "warmachinehintsModal.dialogTitle": {
     "defaultMessage": "प्रोजेक्ट संकेत कॉन्फ़िगर करें (.warmachinehints)"
   },
-  "goosehintsModal.errorReading": {
+  "warmachinehintsModal.errorReading": {
     "defaultMessage": ".warmachinehints फ़ाइल पढ़ने में त्रुटि: {error}"
   },
-  "goosehintsModal.failedToAccess": {
+  "warmachinehintsModal.failedToAccess": {
     "defaultMessage": ".warmachinehints फ़ाइल तक पहुँचने में विफल"
   },
-  "goosehintsModal.failedToSave": {
+  "warmachinehintsModal.failedToSave": {
     "defaultMessage": ".warmachinehints फ़ाइल सहेजने में विफल"
   },
-  "goosehintsModal.fileCreating": {
+  "warmachinehintsModal.fileCreating": {
     "defaultMessage": "नई .warmachinehints फ़ाइल यहां बनाई जा रही है: {filePath}"
   },
-  "goosehintsModal.fileFound": {
+  "warmachinehintsModal.fileFound": {
     "defaultMessage": ".warmachinehints फ़ाइल यहां मिली: {filePath}"
   },
-  "goosehintsModal.helpText1": {
+  "warmachinehintsModal.helpText1": {
     "defaultMessage": ".warmachinehints एक टेक्स्ट फ़ाइल है जिसका उपयोग आपके प्रोजेक्ट के बारे में अतिरिक्त संदर्भ प्रदान करने और WarMachine के साथ संचार को बेहतर बनाने के लिए किया जाता है।"
   },
-  "goosehintsModal.helpText2": {
+  "warmachinehintsModal.helpText2": {
     "defaultMessage": "कृपया सुनिश्चित करें कि एक्सटेंशन पृष्ठ में {bold} एक्सटेंशन सक्षम है। .warmachinehints का उपयोग करने के लिए यह एक्सटेंशन आवश्यक है। .warmachinehints अपडेट को प्रभावी बनाने के लिए आपको अपना सत्र पुनः आरंभ करना होगा।"
   },
-  "goosehintsModal.helpText3": {
+  "warmachinehintsModal.helpText3": {
     "defaultMessage": "अधिक जानकारी के लिए {link} देखें।"
   },
-  "goosehintsModal.helpTextLink": {
+  "warmachinehintsModal.helpTextLink": {
     "defaultMessage": ".warmachinehints का उपयोग करना"
   },
-  "goosehintsModal.placeholder": {
+  "warmachinehintsModal.placeholder": {
     "defaultMessage": "प्रोजेक्ट संकेत यहां दर्ज करें..."
   },
-  "goosehintsModal.save": {
+  "warmachinehintsModal.save": {
     "defaultMessage": "सहेजें"
   },
-  "goosehintsModal.savedSuccessfully": {
+  "warmachinehintsModal.savedSuccessfully": {
     "defaultMessage": "सफलतापूर्वक सहेजा गया"
   },
-  "goosehintsModal.saving": {
+  "warmachinehintsModal.saving": {
     "defaultMessage": "सहेजा जा रहा है..."
   },
-  "goosehintsSection.configure": {
+  "warmachinehintsSection.configure": {
     "defaultMessage": "कॉन्फ़िगर करें"
   },
-  "goosehintsSection.description": {
+  "warmachinehintsSection.description": {
     "defaultMessage": "WarMachine को अतिरिक्त संदर्भ प्रदान करने के लिए अपने प्रोजेक्ट की .warmachinehints फ़ाइल को कॉन्फ़िगर करें"
   },
-  "goosehintsSection.title": {
+  "warmachinehintsSection.title": {
     "defaultMessage": "प्रोजेक्ट संकेत (.warmachinehints)"
   },
   "groupedExtensionLoadingToast.askGoose": {

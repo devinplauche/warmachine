@@ -1263,64 +1263,64 @@
   "externalBackendSection.workingDirPlaceholder": {
     "defaultMessage": "/home/warmachine/workspace"
   },
-  "goosehintsModal.close": {
+  "warmachinehintsModal.close": {
     "defaultMessage": "Tutup"
   },
-  "goosehintsModal.developer": {
+  "warmachinehintsModal.developer": {
     "defaultMessage": "Pembangun"
   },
-  "goosehintsModal.dialogDescription": {
+  "warmachinehintsModal.dialogDescription": {
     "defaultMessage": "Berikan konteks tambahan tentang projek anda untuk meningkatkan komunikasi dengan WarMachine"
   },
-  "goosehintsModal.dialogTitle": {
+  "warmachinehintsModal.dialogTitle": {
     "defaultMessage": "Konfigurasikan Petunjuk Projek (.warmachinehints)"
   },
-  "goosehintsModal.errorReading": {
+  "warmachinehintsModal.errorReading": {
     "defaultMessage": "Ralat membaca fail .warmachinehints: {error}"
   },
-  "goosehintsModal.failedToAccess": {
+  "warmachinehintsModal.failedToAccess": {
     "defaultMessage": "Gagal mengakses fail .warmachinehints"
   },
-  "goosehintsModal.failedToSave": {
+  "warmachinehintsModal.failedToSave": {
     "defaultMessage": "Gagal menyimpan fail .warmachinehints"
   },
-  "goosehintsModal.fileCreating": {
+  "warmachinehintsModal.fileCreating": {
     "defaultMessage": "Mencipta fail .warmachinehints baharu di: {filePath}"
   },
-  "goosehintsModal.fileFound": {
+  "warmachinehintsModal.fileFound": {
     "defaultMessage": "Fail .warmachinehints dijumpai di: {filePath}"
   },
-  "goosehintsModal.helpText1": {
+  "warmachinehintsModal.helpText1": {
     "defaultMessage": ".warmachinehints ialah fail teks yang digunakan untuk memberikan konteks tambahan tentang projek anda dan meningkatkan komunikasi dengan WarMachine."
   },
-  "goosehintsModal.helpText2": {
+  "warmachinehintsModal.helpText2": {
     "defaultMessage": "Sila pastikan sambungan {bold} didayakan dalam halaman sambungan. Sambungan ini diperlukan untuk menggunakan .warmachinehints. Anda perlu memulakan semula sesi anda untuk kemas kini .warmachinehints berkuat kuasa."
   },
-  "goosehintsModal.helpText3": {
+  "warmachinehintsModal.helpText3": {
     "defaultMessage": "Lihat {link} untuk maklumat lanjut."
   },
-  "goosehintsModal.helpTextLink": {
+  "warmachinehintsModal.helpTextLink": {
     "defaultMessage": "menggunakan .warmachinehints"
   },
-  "goosehintsModal.placeholder": {
+  "warmachinehintsModal.placeholder": {
     "defaultMessage": "Masukkan petunjuk projek di sini..."
   },
-  "goosehintsModal.save": {
+  "warmachinehintsModal.save": {
     "defaultMessage": "Simpan"
   },
-  "goosehintsModal.savedSuccessfully": {
+  "warmachinehintsModal.savedSuccessfully": {
     "defaultMessage": "Berjaya disimpan"
   },
-  "goosehintsModal.saving": {
+  "warmachinehintsModal.saving": {
     "defaultMessage": "Menyimpan..."
   },
-  "goosehintsSection.configure": {
+  "warmachinehintsSection.configure": {
     "defaultMessage": "Konfigurasikan"
   },
-  "goosehintsSection.description": {
+  "warmachinehintsSection.description": {
     "defaultMessage": "Konfigurasikan fail .warmachinehints projek anda untuk memberikan konteks tambahan kepada WarMachine"
   },
-  "goosehintsSection.title": {
+  "warmachinehintsSection.title": {
     "defaultMessage": "Petunjuk Projek (.warmachinehints)"
   },
   "groupedExtensionLoadingToast.askGoose": {

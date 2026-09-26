@@ -1263,64 +1263,64 @@
   "externalBackendSection.workingDirPlaceholder": {
     "defaultMessage": "/home/warmachine/workspace"
   },
-  "goosehintsModal.close": {
+  "warmachinehintsModal.close": {
     "defaultMessage": "Cerrar"
   },
-  "goosehintsModal.developer": {
+  "warmachinehintsModal.developer": {
     "defaultMessage": "Developer"
   },
-  "goosehintsModal.dialogDescription": {
+  "warmachinehintsModal.dialogDescription": {
     "defaultMessage": "Proporciona contexto adicional sobre tu proyecto para mejorar la comunicación con WarMachine"
   },
-  "goosehintsModal.dialogTitle": {
+  "warmachinehintsModal.dialogTitle": {
     "defaultMessage": "Configurar pistas del proyecto (.warmachinehints)"
   },
-  "goosehintsModal.errorReading": {
+  "warmachinehintsModal.errorReading": {
     "defaultMessage": "Error al leer el archivo .warmachinehints: {error}"
   },
-  "goosehintsModal.failedToAccess": {
+  "warmachinehintsModal.failedToAccess": {
     "defaultMessage": "No se pudo acceder al archivo .warmachinehints"
   },
-  "goosehintsModal.failedToSave": {
+  "warmachinehintsModal.failedToSave": {
     "defaultMessage": "No se pudo guardar el archivo .warmachinehints"
   },
-  "goosehintsModal.fileCreating": {
+  "warmachinehintsModal.fileCreating": {
     "defaultMessage": "Creando un nuevo archivo .warmachinehints en: {filePath}"
   },
-  "goosehintsModal.fileFound": {
+  "warmachinehintsModal.fileFound": {
     "defaultMessage": "Archivo .warmachinehints encontrado en: {filePath}"
   },
-  "goosehintsModal.helpText1": {
+  "warmachinehintsModal.helpText1": {
     "defaultMessage": ".warmachinehints es un archivo de texto usado para proporcionar contexto adicional sobre tu proyecto y mejorar la comunicación con WarMachine."
   },
-  "goosehintsModal.helpText2": {
+  "warmachinehintsModal.helpText2": {
     "defaultMessage": "Asegúrate de que la extensión {bold} esté habilitada en la página de extensiones. Esta extensión es necesaria para usar .warmachinehints. Tendrás que reiniciar tu sesión para que las actualizaciones de .warmachinehints surtan efecto."
   },
-  "goosehintsModal.helpText3": {
+  "warmachinehintsModal.helpText3": {
     "defaultMessage": "Consulta {link} para más información."
   },
-  "goosehintsModal.helpTextLink": {
+  "warmachinehintsModal.helpTextLink": {
     "defaultMessage": "usar .warmachinehints"
   },
-  "goosehintsModal.placeholder": {
+  "warmachinehintsModal.placeholder": {
     "defaultMessage": "Introduce aquí las pistas del proyecto..."
   },
-  "goosehintsModal.save": {
+  "warmachinehintsModal.save": {
     "defaultMessage": "Guardar"
   },
-  "goosehintsModal.savedSuccessfully": {
+  "warmachinehintsModal.savedSuccessfully": {
     "defaultMessage": "Guardado correctamente"
   },
-  "goosehintsModal.saving": {
+  "warmachinehintsModal.saving": {
     "defaultMessage": "Guardando..."
   },
-  "goosehintsSection.configure": {
+  "warmachinehintsSection.configure": {
     "defaultMessage": "Configurar"
   },
-  "goosehintsSection.description": {
+  "warmachinehintsSection.description": {
     "defaultMessage": "Configura el archivo .warmachinehints de tu proyecto para proporcionar contexto adicional a WarMachine"
   },
-  "goosehintsSection.title": {
+  "warmachinehintsSection.title": {
     "defaultMessage": "Pistas del proyecto (.warmachinehints)"
   },
   "groupedExtensionLoadingToast.askGoose": {

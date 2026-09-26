@@ -1280,66 +1280,6 @@
   "gitBranchIndicator.uncommittedChanges": {
     "defaultMessage": "You may have uncommitted changes."
   },
-  "goosehintsModal.close": {
-    "defaultMessage": "Close"
-  },
-  "goosehintsModal.developer": {
-    "defaultMessage": "Developer"
-  },
-  "goosehintsModal.dialogDescription": {
-    "defaultMessage": "Provide additional context about your project to improve communication with WarMachine"
-  },
-  "goosehintsModal.dialogTitle": {
-    "defaultMessage": "Configure Project Hints (.warmachinehints)"
-  },
-  "goosehintsModal.errorReading": {
-    "defaultMessage": "Error reading .warmachinehints file: {error}"
-  },
-  "goosehintsModal.failedToAccess": {
-    "defaultMessage": "Failed to access .warmachinehints file"
-  },
-  "goosehintsModal.failedToSave": {
-    "defaultMessage": "Failed to save .warmachinehints file"
-  },
-  "goosehintsModal.fileCreating": {
-    "defaultMessage": "Creating new .warmachinehints file at: {filePath}"
-  },
-  "goosehintsModal.fileFound": {
-    "defaultMessage": ".warmachinehints file found at: {filePath}"
-  },
-  "goosehintsModal.helpText1": {
-    "defaultMessage": ".warmachinehints is a text file used to provide additional context about your project and improve the communication with WarMachine."
-  },
-  "goosehintsModal.helpText2": {
-    "defaultMessage": "Please make sure {bold} extension is enabled in the extensions page. This extension is required to use .warmachinehints. You'll need to restart your session for .warmachinehints updates to take effect."
-  },
-  "goosehintsModal.helpText3": {
-    "defaultMessage": "See {link} for more information."
-  },
-  "goosehintsModal.helpTextLink": {
-    "defaultMessage": "using .warmachinehints"
-  },
-  "goosehintsModal.placeholder": {
-    "defaultMessage": "Enter project hints here..."
-  },
-  "goosehintsModal.save": {
-    "defaultMessage": "Save"
-  },
-  "goosehintsModal.savedSuccessfully": {
-    "defaultMessage": "Saved successfully"
-  },
-  "goosehintsModal.saving": {
-    "defaultMessage": "Saving..."
-  },
-  "goosehintsSection.configure": {
-    "defaultMessage": "Configure"
-  },
-  "goosehintsSection.description": {
-    "defaultMessage": "Configure your project's .warmachinehints file to provide additional context to WarMachine"
-  },
-  "goosehintsSection.title": {
-    "defaultMessage": "Project Hints (.warmachinehints)"
-  },
   "groupedExtensionLoadingToast.askGoose": {
     "defaultMessage": "Ask warmachine"
   },
@@ -4768,5 +4708,65 @@
   },
   "userMessage.removeImageFromEdit": {
     "defaultMessage": "Remove image from message"
+  },
+  "warmachinehintsModal.close": {
+    "defaultMessage": "Close"
+  },
+  "warmachinehintsModal.developer": {
+    "defaultMessage": "Developer"
+  },
+  "warmachinehintsModal.dialogDescription": {
+    "defaultMessage": "Provide additional context about your project to improve communication with WarMachine"
+  },
+  "warmachinehintsModal.dialogTitle": {
+    "defaultMessage": "Configure Project Hints (.warmachinehints)"
+  },
+  "warmachinehintsModal.errorReading": {
+    "defaultMessage": "Error reading .warmachinehints file: {error}"
+  },
+  "warmachinehintsModal.failedToAccess": {
+    "defaultMessage": "Failed to access .warmachinehints file"
+  },
+  "warmachinehintsModal.failedToSave": {
+    "defaultMessage": "Failed to save .warmachinehints file"
+  },
+  "warmachinehintsModal.fileCreating": {
+    "defaultMessage": "Creating new .warmachinehints file at: {filePath}"
+  },
+  "warmachinehintsModal.fileFound": {
+    "defaultMessage": ".warmachinehints file found at: {filePath}"
+  },
+  "warmachinehintsModal.helpText1": {
+    "defaultMessage": ".warmachinehints is a text file used to provide additional context about your project and improve the communication with WarMachine."
+  },
+  "warmachinehintsModal.helpText2": {
+    "defaultMessage": "Please make sure {bold} extension is enabled in the extensions page. This extension is required to use .warmachinehints. You'll need to restart your session for .warmachinehints updates to take effect."
+  },
+  "warmachinehintsModal.helpText3": {
+    "defaultMessage": "See {link} for more information."
+  },
+  "warmachinehintsModal.helpTextLink": {
+    "defaultMessage": "using .warmachinehints"
+  },
+  "warmachinehintsModal.placeholder": {
+    "defaultMessage": "Enter project hints here..."
+  },
+  "warmachinehintsModal.save": {
+    "defaultMessage": "Save"
+  },
+  "warmachinehintsModal.savedSuccessfully": {
+    "defaultMessage": "Saved successfully"
+  },
+  "warmachinehintsModal.saving": {
+    "defaultMessage": "Saving..."
+  },
+  "warmachinehintsSection.configure": {
+    "defaultMessage": "Configure"
+  },
+  "warmachinehintsSection.description": {
+    "defaultMessage": "Configure your project's .warmachinehints file to provide additional context to WarMachine"
+  },
+  "warmachinehintsSection.title": {
+    "defaultMessage": "Project Hints (.warmachinehints)"
   }
 }

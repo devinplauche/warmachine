@@ -1263,64 +1263,64 @@
   "externalBackendSection.workingDirPlaceholder": {
     "defaultMessage": "/home/warmachine/workspace"
   },
-  "goosehintsModal.close": {
+  "warmachinehintsModal.close": {
     "defaultMessage": "닫기"
   },
-  "goosehintsModal.developer": {
+  "warmachinehintsModal.developer": {
     "defaultMessage": "개발자"
   },
-  "goosehintsModal.dialogDescription": {
+  "warmachinehintsModal.dialogDescription": {
     "defaultMessage": "warmachine와의 커뮤니케이션을 개선할 수 있도록 프로젝트에 대한 추가 컨텍스트를 제공하세요."
   },
-  "goosehintsModal.dialogTitle": {
+  "warmachinehintsModal.dialogTitle": {
     "defaultMessage": "프로젝트 힌트 구성(.warmachinehints)"
   },
-  "goosehintsModal.errorReading": {
+  "warmachinehintsModal.errorReading": {
     "defaultMessage": ".warmachinehints 파일 읽기 오류: {error}"
   },
-  "goosehintsModal.failedToAccess": {
+  "warmachinehintsModal.failedToAccess": {
     "defaultMessage": ".warmachinehints 파일에 액세스하지 못했습니다."
   },
-  "goosehintsModal.failedToSave": {
+  "warmachinehintsModal.failedToSave": {
     "defaultMessage": ".warmachinehints 파일을 저장하지 못했습니다."
   },
-  "goosehintsModal.fileCreating": {
+  "warmachinehintsModal.fileCreating": {
     "defaultMessage": "새 .warmachinehints 파일 생성: {filePath}"
   },
-  "goosehintsModal.fileFound": {
+  "warmachinehintsModal.fileFound": {
     "defaultMessage": ".warmachinehints 파일 위치: {filePath}"
   },
-  "goosehintsModal.helpText1": {
+  "warmachinehintsModal.helpText1": {
     "defaultMessage": ".warmachinehints는 프로젝트에 대한 추가 컨텍스트를 제공하고 warmachine와의 커뮤니케이션을 개선하는 데 사용되는 텍스트 파일입니다."
   },
-  "goosehintsModal.helpText2": {
+  "warmachinehintsModal.helpText2": {
     "defaultMessage": "익스텐션 페이지에서 {bold} 익스텐션이 활성화되어 있는지 확인하세요. .warmachinehints를 사용하려면 이 익스텐션이 필요합니다. .warmachinehints 업데이트를 적용하려면 세션을 다시 시작해야 합니다."
   },
-  "goosehintsModal.helpText3": {
+  "warmachinehintsModal.helpText3": {
     "defaultMessage": "자세한 내용은 {link}를 참조하세요."
   },
-  "goosehintsModal.helpTextLink": {
+  "warmachinehintsModal.helpTextLink": {
     "defaultMessage": ".warmachinehints 사용"
   },
-  "goosehintsModal.placeholder": {
+  "warmachinehintsModal.placeholder": {
     "defaultMessage": "여기에 프로젝트 힌트를 입력하세요..."
   },
-  "goosehintsModal.save": {
+  "warmachinehintsModal.save": {
     "defaultMessage": "저장"
   },
-  "goosehintsModal.savedSuccessfully": {
+  "warmachinehintsModal.savedSuccessfully": {
     "defaultMessage": "성공적으로 저장되었습니다"
   },
-  "goosehintsModal.saving": {
+  "warmachinehintsModal.saving": {
     "defaultMessage": "저장 중..."
   },
-  "goosehintsSection.configure": {
+  "warmachinehintsSection.configure": {
     "defaultMessage": "설정"
   },
-  "goosehintsSection.description": {
+  "warmachinehintsSection.description": {
     "defaultMessage": "프로젝트의 .warmachinehints 파일을 설정하여 warmachine에 추가 컨텍스트를 제공합니다."
   },
-  "goosehintsSection.title": {
+  "warmachinehintsSection.title": {
     "defaultMessage": "프로젝트 힌트(.warmachinehints)"
   },
   "groupedExtensionLoadingToast.askGoose": {
