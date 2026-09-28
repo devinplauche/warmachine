@@ -911,6 +911,11 @@ impl Agent {
         // Handle pre-approved and read-only tools
         for request in &permission_check_result.approved {
             if let Ok(tool_call) = request.tool_call.clone() {
+                super::tool_execution::audit_tool_call(
+                    tool_call.name.as_ref(),
+                    &session.id,
+                    "allowed",
+                );
                 let (req_id, tool_result) = self
                     .dispatch_tool_call(
                         tool_call,
@@ -942,15 +947,23 @@ impl Agent {
             }
         }
 
-        Self::handle_denied_tools(permission_check_result, request_to_response_map);
+        Self::handle_denied_tools(permission_check_result, request_to_response_map, session);
         Ok(tool_futures)
     }
 
     fn handle_denied_tools(
         permission_check_result: &PermissionCheckResult,
         request_to_response_map: &mut HashMap<String, Message>,
+        session: &Session,
     ) {
         for request in &permission_check_result.denied {
+            if let Ok(tool_call) = request.tool_call.clone() {
+                super::tool_execution::audit_tool_call(
+                    tool_call.name.as_ref(),
+                    &session.id,
+                    "denied",
+                );
+            }
             if let Some(response) = request_to_response_map.get_mut(&request.id) {
                 response.add_tool_response_with_metadata(
                     request.id.clone(),

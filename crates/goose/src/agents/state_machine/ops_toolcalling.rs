@@ -16,7 +16,8 @@ use crate::agents::state_machine::{
     GooseEffect, Operation, OperationResult, SlashCommand,
 };
 use crate::agents::tool_execution::{
-    tool_stream, ToolCallResult, ToolStreamItem, CHAT_MODE_TOOL_SKIPPED_RESPONSE, DECLINED_RESPONSE,
+    audit_tool_call, tool_stream, ToolCallResult, ToolStreamItem, CHAT_MODE_TOOL_SKIPPED_RESPONSE,
+    DECLINED_RESPONSE,
 };
 use crate::agents::AgentEvent;
 use crate::config::GooseMode;
@@ -903,6 +904,7 @@ impl Operation<Session, GooseEffect> for ToolExecutionOperation<'_> {
                 .tool_call
                 .clone()
                 .map_err(|e| anyhow!("tool call could not be parsed: {e}"))?;
+            audit_tool_call(tool_call.name.as_ref(), &session.id, "allowed");
             let result = self
                 .dispatch_tool_call(
                     tool_call,
@@ -934,6 +936,9 @@ impl Operation<Session, GooseEffect> for ToolExecutionOperation<'_> {
             match disposition {
                 ToolDisposition::Execute => {}
                 ToolDisposition::Decline => {
+                    if let Ok(tool_call) = request.tool_call.clone() {
+                        audit_tool_call(tool_call.name.as_ref(), &session.id, "denied");
+                    }
                     response.add_tool_response_with_metadata(
                         request.id.clone(),
                         Ok(CallToolResult::error(vec![ContentBlock::text(

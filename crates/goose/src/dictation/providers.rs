@@ -238,6 +238,18 @@ fn resolve_openai_base_url_target(raw_url: Option<&str>) -> Result<Option<OpenAi
         .transpose()
 }
 
+// On-prem builds must not send audio to public STT APIs: spoken CUI
+// would leave the controlled environment.
+#[cfg(feature = "onprem")]
+fn build_api_client(provider: DictationProvider) -> Result<(ApiClient, String)> {
+    let _ = provider;
+    anyhow::bail!(
+        "cloud dictation is disabled in on-prem builds: transcription audio \
+         would be sent outside the controlled environment"
+    )
+}
+
+#[cfg(not(feature = "onprem"))]
 fn build_api_client(provider: DictationProvider) -> Result<(ApiClient, String)> {
     let config = Config::global();
     let def = get_provider_def(provider);

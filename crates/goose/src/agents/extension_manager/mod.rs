@@ -620,11 +620,13 @@ impl ExtensionManager {
 
         // Best-effort: a failed audit write must not fail the extension load.
         #[cfg(feature = "onprem")]
-        let _ = crate::onprem::audit_event(
+        if let Err(e) = crate::onprem::audit_event(
             "extension_added",
             session_id,
             &serde_json::json!({"name": audit_name, "kind": extension_kind}),
-        );
+        ) {
+            tracing::warn!("audit log write failed: {e:#}");
+        }
 
         Ok(())
     }
@@ -670,6 +672,17 @@ impl ExtensionManager {
         let removed = self.extensions.lock().await.remove(key).is_some();
         if removed {
             self.invalidate_tools_cache_and_bump_version().await;
+            // Best-effort: the removal stands even if the audit write fails.
+            // Disabling an extension removes it from this map (see
+            // `is_extension_enabled`), so this covers the disable path too.
+            #[cfg(feature = "onprem")]
+            if let Err(e) = crate::onprem::audit_event(
+                "extension_removed",
+                None,
+                &serde_json::json!({"name": key}),
+            ) {
+                tracing::warn!("audit log write failed: {e:#}");
+            }
         }
         Ok(removed)
     }

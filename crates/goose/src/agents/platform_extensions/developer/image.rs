@@ -183,6 +183,11 @@ async fn load_image_bytes(source: &str, working_dir: Option<&Path>) -> Result<Ve
 }
 
 async fn load_url_bytes(url: url::Url) -> Result<Vec<u8>, String> {
+    // On-prem builds only fetch image URLs on the compile-time allowlist:
+    // a prompt-injected URL could otherwise exfiltrate via URL/DNS/SNI.
+    #[cfg(feature = "onprem")]
+    crate::onprem::check_url_allowed(url.as_str()).map_err(|e| format!("{e:#}"))?;
+
     let client = reqwest::Client::builder()
         .user_agent(concat!(
             "warmachine/",

@@ -26,12 +26,13 @@ The `onprem` cargo feature (in the `warmachine`, `goose-providers`, and
 | Network allowlist | `goose_providers::onprem::check_url_allowed()` gates `ApiClient` construction — every provider HTTP request funnels through it. Origins outside the allowlist are refused. Plain `http` is rejected for non-loopback hosts (CUI/ITAR must be encrypted in transit). |
 | Extra origins | `WARMACHINE_ONPREM_EXTRA_HOSTS` (optional, comma-separated) allowlists additional origins, e.g. an internal observability collector. |
 | Provider registry | Only the OpenAI-compatible provider is registered. Cloud providers, ACP CLIs, and custom/declarative providers are not registered at all. |
-| Telemetry export | OTLP layers are compiled out. Langfuse is disabled unless its URL is on the allowlist. (Product telemetry was already permanently disabled.) |
+| Telemetry export | OTLP exporter endpoints must pass the network allowlist — an unallowlisted endpoint refuses to initialize, so traces can't leave the enclave. Langfuse is disabled unless its URL is on the allowlist. (Product telemetry was already permanently disabled.) |
 | Session sharing | Nostr session publishing is disabled (default relays are public). |
 | Remote MCP servers | `StreamableHttp` extension URIs must be on the allowlist. Unix-socket transports are local IPC and exempt. |
 | Voice dictation | Cloud STT endpoints are not allowlisted, so dictation fails closed. |
-| Audit log | Every model request appends a hash-chained entry; session start/end and extension installs are logged too (see below). |
+| Audit log | Every model request appends a hash-chained entry; session start/end, extension installs/removals, session exports, every tool call (allowed/denied), keychain failures, and audit verifications are logged too (see below). |
 | At-rest encryption | Session message payloads in `sessions.db` are sealed with AES-256-GCM (see below). |
+| Sealed metadata | Session titles, working directory, and recipe parameters are sealed at rest like message payloads — they can carry CUI (project names, paths, ticket IDs). |
 | Secret storage | The OS keychain is mandatory: `WARMACHINE_DISABLE_KEYRING` is ignored and an unreachable keychain fails closed. |
 | Tool approvals | Every shell/web tool call requires explicit human approval (see below). |
 | FIPS 140-3 | TLS uses the FIPS-validated AWS-LC module (cert #4816); the binary refuses to start if FIPS mode is not active (see below). |
@@ -90,13 +91,29 @@ Two entry shapes, both hash-chained:
   ```
 
 - **Events**: `ts`, `event` (`session_start`, `session_end`,
-  `extension_added`), `session_id`, `details` (small metadata, e.g.
-  `{"name": ..., "kind": "stdio"}` for extensions), `prev_hash`,
-  `entry_hash`, where
+  `extension_added`, `extension_removed`, `session_export`, `tool_call`,
+  `keychain_failure`, `audit_verified`, `audit_cursor_tamper`,
+  `sessions_purged`), `session_id`, `details` (small metadata — tool name
+  and allow/deny decision for `tool_call`, never tool arguments or results),
+  `prev_hash`, `entry_hash`, where
 
   ```
   entry_hash = sha256(prev_hash | ts | event | session_id | details_json)
   ```
+
+Tool calls are audited in **both** agent-loop paths (the legacy loop and the
+state-machine loop): every invocation records the tool name, session id, and
+whether it was allowed or denied. Approval decisions are the actions that
+actually touch CUI, so they get their own trail.
+
+The log file itself is created with `0600` permissions (config dir `0700`),
+writes are serialized with an exclusive file lock, and the log rotates at
+100 MB: the archive (`audit-<UTC timestamp>.log`) keeps the chain — the new
+file's first entry chains from the archived file's last hash, and `verify`
+replays archives in order. Every 100th entry's hash is also written to a
+checkpoint file that `verify` cross-checks, so a rewritten chain is caught
+even without the SIEM copy (the forwarded SIEM copy remains the primary
+external anchor).
 
 The chain makes tampering or deletion detectable: each `prev_hash` must match
 the previous `entry_hash`. Request *content* lives in the session database
@@ -110,6 +127,11 @@ Verify the chain locally:
 warmachine audit verify
 # audit log verified: 128 entries, hash chain intact
 ```
+
+`verify` also replays rotated archives in chronological order and reports
+(rather than fails on) non-monotonic timestamps, which can indicate clock
+tampering or skew. Each `verify` run appends an `audit_verified` event to
+the log itself.
 
 **SIEM forwarding:** the client creates no new egress path — forward the
 JSONL file with your existing log shipper (e.g. Filebeat, Splunk Universal
@@ -133,6 +155,11 @@ message payloads are **encrypted at rest** in the on-prem build:
   plaintext rows are parsed as-is and re-sealed on their next write, so
   plaintext ages out through normal use. GCM also integrity-protects each
   row: tampered rows fail to open instead of decrypting to garbage.
+- Sealing covers more than message bodies: the LLM-generated **session
+  title** (`sessions.name`), the **working directory**, and **recipe
+  parameters** (`user_recipe_values_json`) are sealed too — all three can
+  carry CUI (project names, filesystem paths, ticket IDs) and all three
+  used to rest in plaintext.
 - Because payloads are sealed, keyword search (`session list --match`,
   chat-recall) decrypts candidates in memory and matches in Rust instead of
   in SQL. Results are identical; large histories are somewhat slower.
@@ -158,6 +185,11 @@ On-prem builds are **default-deny** for tool execution: every web tool call
 requires explicit human approval in the CLI before it runs. Pattern-based
 egress detection is bypassable (obfuscation, novel exfil paths); approval
 is not.
+
+Every tool invocation — allowed or denied — is written to the audit log
+(`tool_call` event with tool name, session id, and decision; arguments and
+results never enter the log), in both the legacy and state-machine agent
+loops.
 
 The **shell tool is removed entirely** in on-prem builds — it is not
 registered, so the model never sees it, and direct invocations (including
@@ -222,6 +254,9 @@ retention period:
   rather than keeping sessions forever.
 - Purged sessions are deleted with their messages and usage-ledger rows;
   each purge batch is recorded in the audit log (`sessions_purged` event).
+- After a purge batch deletes rows, the database is `VACUUM`ed so purged
+  CUI is actually reclaimed from SQLite free pages instead of lingering
+  recoverably on disk.
 
 ## Egress sandbox test
 
@@ -283,8 +318,15 @@ to a SIEM:
   (`Content-Type: application/x-ndjson`, 500 entries/batch, 60s interval)
   over TLS — using the FIPS-validated provider, since forwarding starts
   after `init_fips_crypto()`.
-- A cursor file (`audit.forward.cursor` next to `audit.log`) records the
-  last forwarded `entry_hash`, so restarts resume without duplicates.
+- A cursor file (`audit.forward.cursor` next to `audit.log`, `0600`,
+  HMAC-protected with a keychain-held key) records the last forwarded
+  `entry_hash`, so restarts resume without duplicates. If the cursor's MAC
+  fails verification, the forwarder logs loudly, writes an
+  `audit_cursor_tamper` event into the audit log, and resumes from the
+  pre-tamper tail so the tamper alert itself is forwarded.
+- At startup the baked-in sink URL is validated against the network
+  allowlist and must use `https`; on mismatch the forwarder refuses to
+  start (loud error, local log unaffected).
 - Forwarding is **best-effort**: sink failures are logged and retried; the
   local log is unaffected and entries are never lost. If no sink URL was
   baked in, the forwarder is a complete no-op.

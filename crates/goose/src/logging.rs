@@ -59,6 +59,22 @@ pub fn build_logging_subscriber(
         None => format!("{}.log", timestamp),
     };
 
+    // Pre-create the log file owner-only: the rolling appender opens (rather
+    // than creates-with-mode) the file, so without this it inherits the
+    // umask. Best-effort — logging must not fail over hardening.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        if let Err(e) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(log_dir.join(&log_filename))
+        {
+            eprintln!("warning: could not pre-create log file with restrictive permissions: {e}");
+        }
+    }
+
     let file_appender =
         tracing_appender::rolling::RollingFileAppender::new(Rotation::NEVER, log_dir, log_filename);
 
@@ -123,11 +139,25 @@ pub fn prepare_log_directory(component: &str, use_date_subdir: bool) -> Result<P
     let log_dir = if use_date_subdir {
         component_dir.join(chrono::Local::now().format("%Y-%m-%d").to_string())
     } else {
-        component_dir
+        // Cloned: the hardening pass below still needs component_dir.
+        component_dir.clone()
     };
 
     fs::create_dir_all(&log_dir)
         .with_context(|| format!("Failed to create log directory: {:?}", log_dir))?;
+
+    // Owner-only log directories (0o700 on unix): log content must never be
+    // world-readable. Best-effort — logging setup must not fail over
+    // hardening; the 0o600 pre-created log files below are the second layer.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for dir in [&component_dir, &log_dir] {
+            if let Err(e) = fs::set_permissions(dir, fs::Permissions::from_mode(0o700)) {
+                eprintln!("warning: could not restrict log directory permissions: {e}");
+            }
+        }
+    }
 
     Ok(log_dir)
 }

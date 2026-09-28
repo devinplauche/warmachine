@@ -24,8 +24,15 @@ async fn run() -> Result<()> {
     // On-prem builds ship audit entries to the configured SIEM sink in the
     // background (best-effort; the local hash-chained log is the source of
     // truth). No-op unless WARMACHINE_ONPREM_AUDIT_SINK_URL was baked in.
+    // A misconfigured sink disables only the forwarder, never the binary:
+    // the desktop spawns this same binary for `warmachine serve`, so this
+    // covers desktop-driven sessions too.
     #[cfg(feature = "onprem")]
-    warmachine::onprem::spawn_audit_forwarder();
+    if let Err(e) = warmachine::onprem::validate_audit_sink() {
+        tracing::error!("audit SIEM sink misconfigured, forwarder disabled: {e:#}");
+    } else {
+        warmachine::onprem::spawn_audit_forwarder();
+    }
 
     let result = cli().await;
 

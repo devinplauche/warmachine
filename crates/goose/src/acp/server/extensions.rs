@@ -81,6 +81,14 @@ impl GooseAcpAgent {
         req: RemoveConfigExtensionRequest,
     ) -> Result<EmptyResponse, agent_client_protocol::Error> {
         crate::config::extensions::remove_extension(&req.config_key);
+        #[cfg(feature = "onprem")]
+        if let Err(e) = crate::onprem::audit_event(
+            "extension_removed",
+            None,
+            &serde_json::json!({"config_key": req.config_key, "layer": "config"}),
+        ) {
+            tracing::warn!("audit log write failed: {e:#}");
+        }
         Ok(EmptyResponse {})
     }
 

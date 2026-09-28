@@ -257,6 +257,33 @@ pub fn signal_exporter(signal: &str) -> Option<ExporterType> {
     }
 }
 
+/// On-prem builds only export OTLP to endpoints on the compile-time
+/// allowlist. Traces can carry prompts, so an unlisted collector would
+/// exfiltrate CUI. The exporter falls back to http://localhost:4318 when no
+/// endpoint is configured, so the effective endpoint is validated either way.
+#[cfg(feature = "onprem")]
+fn validate_otlp_endpoint_allowed(signal: &str) -> OtlpResult<()> {
+    let signal_var = format!("OTEL_EXPORTER_OTLP_{}_ENDPOINT", signal.to_uppercase());
+    let endpoint = env::var(&signal_var)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| {
+            env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+                .ok()
+                .filter(|v| !v.is_empty())
+        })
+        .unwrap_or_else(|| "http://localhost:4318".to_string());
+    if let Err(e) = crate::onprem::check_url_allowed(&endpoint) {
+        // Security event: refusing to export telemetry that may contain prompts.
+        eprintln!("warmachine otel: refusing OTLP {signal} export to {endpoint}: {e:#}");
+        return Err(format!(
+            "OTLP {signal} endpoint is not on the on-prem allowlist; export disabled"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// Promotes warmachine config-file OTel settings to env vars before exporter build.
 pub fn promote_config_to_env(config: &crate::config::Config) {
     if env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_err() {
@@ -329,6 +356,8 @@ fn create_otlp_tracing_layer() -> OtlpResult<OtlpTracingLayer> {
 
     let tracer_provider = match exporter {
         ExporterType::Otlp => {
+            #[cfg(feature = "onprem")]
+            validate_otlp_endpoint_allowed("traces")?;
             if !signal_protocol_is_http("traces") {
                 warn_grpc_protocol_skipped_once();
                 return Err("OTLP traces protocol is grpc but warmachine was built without grpc-tonic; skipping traces exporter".into());
@@ -381,6 +410,8 @@ fn create_otlp_metrics_layer() -> OtlpResult<OtlpMetricsLayer> {
 
     let meter_provider = match exporter {
         ExporterType::Otlp => {
+            #[cfg(feature = "onprem")]
+            validate_otlp_endpoint_allowed("metrics")?;
             if !signal_protocol_is_http("metrics") {
                 warn_grpc_protocol_skipped_once();
                 return Err("OTLP metrics protocol is grpc but warmachine was built without grpc-tonic; skipping metrics exporter".into());
@@ -420,6 +451,8 @@ fn create_otlp_logs_layer() -> OtlpResult<OtlpLogsLayer> {
 
     let logger_provider = match exporter {
         ExporterType::Otlp => {
+            #[cfg(feature = "onprem")]
+            validate_otlp_endpoint_allowed("logs")?;
             if !signal_protocol_is_http("logs") {
                 warn_grpc_protocol_skipped_once();
                 return Err("OTLP logs protocol is grpc but warmachine was built without grpc-tonic; skipping logs exporter".into());

@@ -1,6 +1,7 @@
 pub mod handler;
 pub mod manager;
 pub mod pairing;
+#[cfg(not(feature = "onprem"))]
 pub mod telegram;
 
 use async_trait::async_trait;
@@ -94,6 +95,7 @@ pub trait Gateway: Send + Sync + 'static {
 
 pub fn create_gateway(config: &mut GatewayConfig) -> anyhow::Result<std::sync::Arc<dyn Gateway>> {
     match config.gateway_type.as_str() {
+        #[cfg(not(feature = "onprem"))]
         "telegram" => Ok(std::sync::Arc::new(telegram::TelegramGateway::new(config)?)),
         other => anyhow::bail!("Unknown gateway type: {}", other),
     }

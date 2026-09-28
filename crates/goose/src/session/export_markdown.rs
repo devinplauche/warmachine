@@ -456,6 +456,18 @@ fn message_to_markdown_for_audience(
 }
 
 pub fn export_session_to_markdown(messages: Vec<Message>, session_name: &str) -> String {
+    // Security event: session content leaving the session store as a file.
+    // Best-effort: the export proceeds even if the audit write fails. The
+    // session name is not logged — titles can carry CUI.
+    #[cfg(feature = "onprem")]
+    if let Err(e) = crate::onprem::audit_event(
+        "session_export",
+        None,
+        &serde_json::json!({"messages": messages.len()}),
+    ) {
+        tracing::warn!("audit log write failed: {e:#}");
+    }
+
     let mut markdown_output = String::new();
 
     markdown_output.push_str(&format!("# Session Export: {}\n\n", session_name));

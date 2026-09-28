@@ -1969,8 +1969,26 @@ async fn handle_serve_command(args: ServeCommandArgs) -> Result<()> {
 async fn handle_audit_command(command: AuditCommand) -> Result<()> {
     match command {
         AuditCommand::Verify => {
-            let count = warmachine::onprem::verify_audit_log()?;
-            println!("audit log verified: {count} entries, hash chain intact");
+            let report = warmachine::onprem::verify_audit_log()?;
+            // Best-effort: the verify run is itself a security-relevant event.
+            if let Err(e) = warmachine::onprem::audit_event(
+                "audit_verified",
+                None,
+                &serde_json::json!({"entries": report.entries}),
+            ) {
+                tracing::warn!("audit log write failed: {e:#}");
+            }
+            if report.non_monotonic_timestamps > 0 {
+                println!(
+                    "audit log verified: {} entries, hash chain intact; {} non-monotonic timestamps",
+                    report.entries, report.non_monotonic_timestamps
+                );
+            } else {
+                println!(
+                    "audit log verified: {} entries, hash chain intact",
+                    report.entries
+                );
+            }
             Ok(())
         }
     }

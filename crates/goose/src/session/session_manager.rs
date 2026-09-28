@@ -816,6 +816,56 @@ fn deserialize_session_model_config(
     Some(model_config)
 }
 
+/// Seal a string session column (e.g. `name`, `working_dir`) for storage.
+///
+/// On-prem builds JSON-encode the value first so sealed rows stay
+/// self-describing, then seal them with the session key. Standard builds
+/// store the value exactly as today.
+#[cfg(feature = "onprem")]
+fn seal_string_column(value: &str) -> Result<String> {
+    crate::onprem::seal_payload(&serde_json::to_string(value)?)
+}
+
+#[cfg(not(feature = "onprem"))]
+fn seal_string_column(value: &str) -> Result<String> {
+    Ok(value.to_owned())
+}
+
+/// Seal an already-JSON-serialized session column (e.g.
+/// `user_recipe_values_json`) for storage; standard builds pass it through.
+#[cfg(feature = "onprem")]
+fn seal_json_column(plaintext_json: &str) -> Result<String> {
+    crate::onprem::seal_payload(plaintext_json)
+}
+
+#[cfg(not(feature = "onprem"))]
+fn seal_json_column(plaintext_json: &str) -> Result<String> {
+    Ok(plaintext_json.to_owned())
+}
+
+/// Open a possibly-sealed session column.
+///
+/// Sealed envelopes are JSON objects carrying the "enc" marker; anything else
+/// is a legacy plaintext row (written before column sealing) and is returned
+/// as-is. Callers re-seal on write, so plaintext ages out through normal use.
+#[cfg(feature = "onprem")]
+pub(crate) fn open_session_column(stored: &str) -> Result<String> {
+    let is_envelope = matches!(
+        serde_json::from_str::<serde_json::Value>(stored),
+        Ok(value) if value.get("enc").is_some()
+    );
+    if is_envelope {
+        crate::onprem::open_payload(stored)
+    } else {
+        Ok(stored.to_owned())
+    }
+}
+
+#[cfg(not(feature = "onprem"))]
+pub(crate) fn open_session_column(stored: &str) -> Result<String> {
+    Ok(stored.to_owned())
+}
+
 impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
     fn from_row(row: &sqlx::sqlite::SqliteRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
@@ -824,8 +874,14 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
         let recipe = recipe_json.and_then(|json| serde_json::from_str(&json).ok());
 
         let user_recipe_values_json: Option<String> = row.try_get("user_recipe_values_json")?;
-        let user_recipe_values =
-            user_recipe_values_json.and_then(|json| serde_json::from_str(&json).ok());
+        let user_recipe_values = match user_recipe_values_json {
+            Some(json) => {
+                let opened = open_session_column(&json)
+                    .map_err(|e| sqlx::Error::Decode(e.to_string().into()))?;
+                serde_json::from_str(&opened).ok()
+            }
+            None => None,
+        };
 
         let provider_name: Option<String> = row.try_get("provider_name").ok().flatten();
         let model_config_json: Option<String> = row.try_get("model_config_json").ok().flatten();
@@ -836,7 +892,8 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
         let name: String = {
             let name_val: String = row.try_get("name").unwrap_or_default();
             if !name_val.is_empty() {
-                name_val
+                open_session_column(&name_val)
+                    .map_err(|e| sqlx::Error::Decode(e.to_string().into()))?
             } else {
                 row.try_get("description").unwrap_or_default()
             }
@@ -857,7 +914,13 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
 
         Ok(Session {
             id: row.try_get("id")?,
-            working_dir: PathBuf::from(row.try_get::<String, _>("working_dir")?),
+            working_dir: {
+                let stored: String = row.try_get("working_dir")?;
+                PathBuf::from(
+                    open_session_column(&stored)
+                        .map_err(|e| sqlx::Error::Decode(e.to_string().into()))?,
+                )
+            },
             name,
             user_set_name,
             session_type,
@@ -1205,7 +1268,9 @@ impl SessionStorage {
         };
 
         let user_recipe_values_json = match &session.user_recipe_values {
-            Some(user_recipe_values) => Some(serde_json::to_string(user_recipe_values)?),
+            Some(user_recipe_values) => Some(seal_json_column(&serde_json::to_string(
+                user_recipe_values,
+            )?)?),
             None => None,
         };
 
@@ -1229,10 +1294,10 @@ impl SessionStorage {
         "#,
         )
         .bind(&session.id)
-        .bind(&session.name)
+        .bind(seal_string_column(&session.name)?)
         .bind(session.user_set_name)
         .bind(session.session_type.to_string())
-        .bind(&*session.working_dir.to_string_lossy())
+        .bind(seal_string_column(&session.working_dir.to_string_lossy())?)
         .bind(session.created_at)
         .bind(session.updated_at)
         .bind(serde_json::to_string(&session.extension_data)?)
@@ -1656,9 +1721,9 @@ impl SessionStorage {
         )
             .bind(&today)
             .bind(&today)
-            .bind(&name)
+            .bind(seal_string_column(&name)?)
             .bind(session_type.to_string())
-            .bind(&*working_dir.to_string_lossy())
+            .bind(seal_string_column(&working_dir.to_string_lossy())?)
             .bind(goose_mode.to_string())
             .fetch_one(&mut *tx)
             .await?;
@@ -1668,11 +1733,13 @@ impl SessionStorage {
         crate::posthog::emit_session_started();
         // Best-effort: a failed audit write must not fail session creation.
         #[cfg(feature = "onprem")]
-        let _ = crate::onprem::audit_event(
+        if let Err(e) = crate::onprem::audit_event(
             "session_start",
             Some(&session.id),
             &serde_json::json!({"session_type": session_type.to_string()}),
-        );
+        ) {
+            warn!("on-prem audit log write failed: {e:#}");
+        }
         // Enforce the retention policy on every session start: sessions older
         // than the cutoff are purged. Compiled in, so it cannot be disabled.
         // Best-effort: a purge failure must not fail session creation.
@@ -1794,7 +1861,7 @@ impl SessionStorage {
         let mut q = sqlx::query(AssertSqlSafe(query));
 
         if let Some(name) = builder.name {
-            q = q.bind(name);
+            q = q.bind(seal_string_column(&name)?);
         }
         if let Some(user_set_name) = builder.user_set_name {
             q = q.bind(user_set_name);
@@ -1803,7 +1870,7 @@ impl SessionStorage {
             q = q.bind(session_type.to_string());
         }
         if let Some(wd) = builder.working_dir {
-            q = q.bind(wd.to_string_lossy().to_string());
+            q = q.bind(seal_string_column(&wd.to_string_lossy())?);
         }
         if let Some(ed) = builder.extension_data {
             q = q.bind(serde_json::to_string(&ed)?);
@@ -1836,7 +1903,7 @@ impl SessionStorage {
         }
         if let Some(user_recipe_values) = builder.user_recipe_values {
             let user_recipe_values_json = user_recipe_values
-                .map(|urv| serde_json::to_string(&urv))
+                .map(|urv| seal_json_column(&serde_json::to_string(&urv)?))
                 .transpose()?;
             q = q.bind(user_recipe_values_json);
         }
@@ -2420,7 +2487,11 @@ impl SessionStorage {
         tx.commit().await?;
         // Best-effort: a failed audit write must not fail session deletion.
         #[cfg(feature = "onprem")]
-        let _ = crate::onprem::audit_event("session_end", Some(session_id), &serde_json::json!({}));
+        if let Err(e) =
+            crate::onprem::audit_event("session_end", Some(session_id), &serde_json::json!({}))
+        {
+            warn!("on-prem audit log write failed: {e:#}");
+        }
         Ok(())
     }
 
@@ -2453,13 +2524,42 @@ impl SessionStorage {
                 .await?;
         }
 
-        tx.commit().await?;
+        // The threads tables are dead schema today (no writers anywhere in the
+        // crate), but any future writer would otherwise escape retention, so
+        // keep them empty. They only exist on databases that ran the migration
+        // that added them.
         #[cfg(feature = "onprem")]
-        let _ = crate::onprem::audit_event(
+        for (table, delete) in [
+            ("threads", "DELETE FROM threads"),
+            ("thread_messages", "DELETE FROM thread_messages"),
+        ] {
+            let exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)",
+            )
+            .bind(table)
+            .fetch_one(&mut *tx)
+            .await?;
+            if exists {
+                sqlx::query(delete).execute(&mut *tx).await?;
+            }
+        }
+
+        tx.commit().await?;
+        // VACUUM cannot run inside a transaction, so it goes after commit.
+        // Reclaiming the freed pages keeps purged CUI from lingering in the
+        // database file's freelist.
+        #[cfg(feature = "onprem")]
+        if purged > 0 {
+            sqlx::query("VACUUM").execute(pool).await?;
+        }
+        #[cfg(feature = "onprem")]
+        if let Err(e) = crate::onprem::audit_event(
             "sessions_purged",
             None,
             &serde_json::json!({ "purged_count": purged }),
-        );
+        ) {
+            warn!("on-prem audit log write failed: {e:#}");
+        }
         Ok(purged)
     }
 

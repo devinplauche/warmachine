@@ -145,6 +145,31 @@ pub const CHAT_MODE_TOOL_SKIPPED_RESPONSE: &str = "Let the user know the tool ca
                                         2. **Outline Steps** - Break down the steps.\n \
                                         If needed, adjust the explanation based on user preferences or questions.";
 
+/// On-prem audit hook: one `tool_call` event per tool invocation, recording
+/// the tool name, session id, and the allow/deny decision. Tool arguments and
+/// results never enter the log. Best-effort: a failed audit write warns but
+/// never fails the tool call.
+///
+/// Called from the approval-decision points in this module, which the legacy
+/// agent loop's interactive-approval path funnels through. Decision points
+/// that bypass this module (the legacy loop's permission-manager
+/// auto-allow/deny path, the state machine's disposition loop) must call this
+/// themselves to keep the trail complete.
+#[cfg(feature = "onprem")]
+pub fn audit_tool_call(tool: &str, session_id: &str, decision: &str) {
+    if let Err(e) = crate::onprem::audit_event(
+        "tool_call",
+        Some(session_id),
+        &serde_json::json!({"tool": tool, "decision": decision}),
+    ) {
+        tracing::warn!("audit log write failed: {e:#}");
+    }
+}
+
+/// Non-on-prem builds keep no audit trail; the hook compiles away.
+#[cfg(not(feature = "onprem"))]
+pub fn audit_tool_call(_tool: &str, _session_id: &str, _decision: &str) {}
+
 impl Agent {
     pub(super) fn handle_approval_tool_requests<'a>(
         &'a self,
@@ -203,6 +228,7 @@ impl Agent {
                 }
 
                 if confirmation.permission == Permission::AllowOnce || confirmation.permission == Permission::AlwaysAllow {
+                    audit_tool_call(tool_call.name.as_ref(), &session.id, "allowed");
                     let (req_id, tool_result) = self.dispatch_tool_call(tool_call.clone(), request.id.clone(), cancellation_token.clone(), session).await;
 
                     tool_futures.push((req_id, match tool_result {
@@ -224,6 +250,7 @@ impl Agent {
                             .await;
                     }
                 } else {
+                    audit_tool_call(tool_call.name.as_ref(), &session.id, "denied");
                     if let Some(response) = request_to_response_map.get_mut(&request.id) {
                         response.add_tool_response_with_metadata(
                             request.id.clone(),

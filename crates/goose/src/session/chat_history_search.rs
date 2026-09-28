@@ -1,6 +1,6 @@
 use crate::conversation::message::MessageContent;
 use crate::session::payload_seal;
-use crate::session::session_manager::SessionType;
+use crate::session::session_manager::{open_session_column, SessionType};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rmcp::model::Role;
@@ -286,6 +286,9 @@ impl<'a> ChatHistorySearch<'a> {
             timestamp,
         ) in rows
         {
+            // working_dir is sealed at rest in on-prem builds; open it for display.
+            let session_working_dir =
+                open_session_column(&session_working_dir).unwrap_or(session_working_dir);
             if let Ok(content_vec) = payload_seal::open::<Vec<MessageContent>>(&content_json) {
                 let agent_visible_content = content_vec
                     .into_iter()
