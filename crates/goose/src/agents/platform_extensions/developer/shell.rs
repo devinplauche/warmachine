@@ -2,11 +2,11 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(not(windows))]
 use std::sync::Arc;
 #[cfg(not(windows))]
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use rmcp::model::{Annotations, CallToolResult, ContentBlock, TextContent};
@@ -17,17 +17,17 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::OnceCell;
 #[cfg(not(windows))]
 use tokio::task::JoinHandle;
-use tokio_stream::{wrappers::SplitStream, StreamExt};
+use tokio_stream::{StreamExt, wrappers::SplitStream};
 use tokio_util::sync::CancellationToken;
 
 use crate::agents::tool_execution::ToolCallNotificationEmitter;
 use crate::subprocess::SubprocessExt;
 
 pub use super::shell_output_streaming::{
-    parse_shell_output_notification, ShellOutputNotificationChunk, ShellOutputNotificationParams,
-    ShellOutputStream, DEVELOPER_SHELL_OUTPUT_NOTIFICATION_METHOD,
+    DEVELOPER_SHELL_OUTPUT_NOTIFICATION_METHOD, ShellOutputNotificationChunk,
+    ShellOutputNotificationParams, ShellOutputStream, parse_shell_output_notification,
 };
-use super::shell_output_streaming::{ShellOutputBatcher, SHELL_LIVE_OUTPUT_FLUSH_INTERVAL};
+use super::shell_output_streaming::{SHELL_LIVE_OUTPUT_FLUSH_INTERVAL, ShellOutputBatcher};
 
 /// Check if the current process is running inside a Flatpak sandbox.
 ///
@@ -377,6 +377,7 @@ impl ShellTool {
             .await
     }
 
+    #[cfg_attr(feature = "onprem", allow(unused_variables))]
     pub(crate) async fn shell_with_cwd_and_emitter(
         &self,
         params: ShellParams,
@@ -385,6 +386,19 @@ impl ShellTool {
         notification_emitter: Option<ToolCallNotificationEmitter>,
         cancellation_token: CancellationToken,
     ) -> CallToolResult {
+        // On-prem builds remove the shell tool: arbitrary commands can open
+        // network connections outside the build's allowlist, and command-text
+        // filtering is bypassable. This refusal is defense-in-depth for
+        // callers that bypass tool registration (e.g. the `!` bang path);
+        // get_tools() already hides the tool from the model.
+        #[cfg(feature = "onprem")]
+        return Self::error_result(
+            "The shell tool is disabled in on-prem builds: shell commands can \
+             open network connections outside the build's network allowlist. \
+             Run commands in your own terminal instead.",
+            None,
+        );
+
         if params.command.trim().is_empty() {
             return Self::error_result("Command cannot be empty.", None);
         }
@@ -947,6 +961,7 @@ fn save_full_output(
 }
 
 #[cfg(test)]
+#[cfg(not(feature = "onprem"))]
 mod tests {
     use super::*;
     use rmcp::model::ContentBlock;
@@ -1404,5 +1419,33 @@ mod tests {
             "killed process should have no exit code"
         );
         assert!(extract_text(&result).contains("Command timed out after 1 seconds"));
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "onprem")]
+mod onprem_tests {
+    use super::*;
+    use rmcp::model::ContentBlock;
+
+    #[tokio::test]
+    async fn shell_tool_refuses_in_onprem_builds() {
+        let tool = ShellTool::new_for_test().unwrap();
+        let result = tool
+            .shell(ShellParams {
+                command: "echo hello".to_string(),
+                timeout_secs: None,
+            })
+            .await;
+
+        assert_eq!(result.is_error, Some(true));
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => text.text.as_str(),
+            _ => panic!("expected text content"),
+        };
+        assert!(
+            text.contains("on-prem"),
+            "refusal should explain the on-prem policy, got: {text}"
+        );
     }
 }

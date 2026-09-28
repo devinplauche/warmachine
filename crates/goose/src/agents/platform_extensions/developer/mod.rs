@@ -18,7 +18,9 @@ use rmcp::model::{
 };
 use schemars::{schema_for, JsonSchema};
 use serde_json::Value;
-use shell::{shell_display_name, ShellOutput, ShellParams, ShellTool};
+use shell::{ShellParams, ShellTool};
+#[cfg(not(feature = "onprem"))]
+use shell::{shell_display_name, ShellOutput};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tree::{TreeParams, TreeTool};
@@ -40,7 +42,26 @@ pub struct DeveloperClient {
 }
 
 fn developer_instructions() -> &'static str {
-    if cfg!(windows) {
+    // On-prem builds remove the shell tool, so the instructions must not
+    // tell the model to run commands.
+    if cfg!(feature = "onprem") {
+        indoc! {"
+            Use the developer extension to inspect and modify files.
+
+            Make sure to use the tools *efficiently* - reading all the content you need in as few
+            iterations as possible and then making the requested edits. You are
+            responsible for managing your context window, and to minimize unnecessary turns which
+            cost the user money.
+
+            For editing software, prefer the flow of using tree to understand the codebase structure
+            and file sizes. Then use write and edit to efficiently make changes.
+            Test and verify as appropriate.
+
+            Note: this on-prem build has no shell tool. You cannot run commands,
+            build software, or execute scripts — ask the user to run anything
+            that needs a terminal.
+        "}
+    } else if cfg!(windows) {
         indoc! {"
             Use the developer extension to build software and operate a terminal.
 
@@ -106,7 +127,7 @@ impl DeveloperClient {
     }
 
     pub(crate) fn get_tools() -> Vec<Tool> {
-        vec![
+        let mut tools = vec![
             Tool::new(
                 "write".to_string(),
                 "Create a new file or overwrite an existing file. Creates parent directories if needed.".to_string(),
@@ -131,24 +152,33 @@ impl DeveloperClient {
                 Some(false),
                 Some(false),
             )),
-            {
-                let shell = shell_display_name();
-                let newline_note = if shell == "cmd" {
-                    " Commands must be on a single line — cmd.exe silently truncates at the \
-                     first newline. Use `&` to chain (e.g. `echo a & echo b`) or set \
-                     WARMACHINE_SHELL=powershell for multi-line support."
-                } else {
-                    ""
-                };
-                let description = format!(
-                    "Execute a shell command in the current dir. Commands run under `{shell}` \
-                     (set WARMACHINE_SHELL to override) - write command strings in that shell's \
-                     syntax.{newline_note} Returns an object with stdout and stderr as separate \
-                     fields. The output of each stream is limited to up to 2000 lines, and \
-                     longer outputs will be saved to a temporary file.",
-                );
-                Tool::new("shell".to_string(), description, Self::schema::<ShellParams>())
-            }
+        ];
+        // On-prem builds remove the shell tool entirely: arbitrary commands
+        // can open network connections outside the build's allowlist, and
+        // command-text filtering is bypassable, so the capability is removed
+        // at compile time rather than sandbox-gated at runtime.
+        #[cfg(not(feature = "onprem"))]
+        tools.push({
+            let shell = shell_display_name();
+            let newline_note = if shell == "cmd" {
+                " Commands must be on a single line — cmd.exe silently truncates at the \
+                 first newline. Use `&` to chain (e.g. `echo a & echo b`) or set \
+                 WARMACHINE_SHELL=powershell for multi-line support."
+            } else {
+                ""
+            };
+            let description = format!(
+                "Execute a shell command in the current dir. Commands run under `{shell}` \
+                 (set WARMACHINE_SHELL to override) - write command strings in that shell's \
+                 syntax.{newline_note} Returns an object with stdout and stderr as separate \
+                 fields. The output of each stream is limited to up to 2000 lines, and \
+                 longer outputs will be saved to a temporary file.",
+            );
+            Tool::new(
+                "shell".to_string(),
+                description,
+                Self::schema::<ShellParams>(),
+            )
             .with_output_schema::<ShellOutput>()
             .annotate(ToolAnnotations::from_raw(
                 Some("Shell".to_string()),
@@ -156,7 +186,9 @@ impl DeveloperClient {
                 Some(true),
                 Some(false),
                 Some(true),
-            )),
+            ))
+        });
+        tools.extend([
             Tool::new(
                 "tree".to_string(),
                 "List a directory tree with line counts. Traversal respects .gitignore rules.".to_string(),
@@ -181,7 +213,8 @@ impl DeveloperClient {
                 Some(true),
                 Some(true),
             )),
-        ]
+        ]);
+        tools
     }
 }
 
@@ -276,6 +309,10 @@ mod tests {
             .map(|t| t.name.to_string())
             .collect();
 
+        // On-prem builds remove the shell tool (see get_tools).
+        #[cfg(feature = "onprem")]
+        assert_eq!(names, vec!["write", "edit", "tree", "read_image"]);
+        #[cfg(not(feature = "onprem"))]
         assert_eq!(names, vec!["write", "edit", "shell", "tree", "read_image"]);
     }
 
@@ -355,6 +392,7 @@ mod tests {
     }
 
     #[cfg(not(windows))]
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn developer_client_passes_session_id_to_shell_tool() {
         let temp = tempfile::tempdir().unwrap();
@@ -378,6 +416,7 @@ mod tests {
     }
 
     #[cfg(not(windows))]
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn developer_client_uses_working_dir_for_shell_tool() {
         let temp = tempfile::tempdir().unwrap();

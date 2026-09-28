@@ -154,10 +154,17 @@ The on-prem build treats the OS keychain as mandatory infrastructure:
 
 ## Tool approvals
 
-On-prem builds are **default-deny** for tool execution: every shell or web
-tool call requires explicit human approval in the CLI before it runs.
-Pattern-based egress detection is bypassable (obfuscation, novel exfil
-paths); approval is not.
+On-prem builds are **default-deny** for tool execution: every web tool call
+requires explicit human approval in the CLI before it runs. Pattern-based
+egress detection is bypassable (obfuscation, novel exfil paths); approval
+is not.
+
+The **shell tool is removed entirely** in on-prem builds — it is not
+registered, so the model never sees it, and direct invocations (including
+the `!` bang-shell path) are refused at compile time. Rationale: arbitrary
+shell commands can open network connections outside the build's allowlist,
+and command-text filtering is bypassable, so the capability is removed
+rather than sandbox-gated. Run commands in your own terminal.
 
 Operational notes:
 
