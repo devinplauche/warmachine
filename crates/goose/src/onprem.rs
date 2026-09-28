@@ -755,7 +755,7 @@ pub fn verify_audit_log() -> Result<VerifyReport> {
             }
             file_count += 1;
             report.entries += 1;
-            if file_count % AUDIT_CHECKPOINT_EVERY as u64 == 0 {
+            if file_count.is_multiple_of(AUDIT_CHECKPOINT_EVERY as u64) {
                 if let Some(expected) = checkpoints.get(&file_count) {
                     if expected != entry_hash {
                         anyhow::bail!(

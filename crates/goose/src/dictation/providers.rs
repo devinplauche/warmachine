@@ -12,10 +12,13 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
+#[cfg(not(feature = "onprem"))]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TRANSCRIPTION_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_TRANSCRIPTION_ERROR_PREVIEW_BYTES: usize = 8 * 1024;
+#[cfg(not(feature = "onprem"))]
 const OPENAI_VERSIONLESS_TRANSCRIPTIONS_PATH: &str = "audio/transcriptions";
+#[cfg(not(feature = "onprem"))]
 type OpenAiDictationTarget = (String, Vec<(String, String)>, String);
 
 struct ModelNativeResolved {
@@ -220,6 +223,7 @@ pub async fn transcribe_local(audio_bytes: Vec<u8>) -> Result<String> {
     })?
 }
 
+#[cfg(not(feature = "onprem"))]
 fn openai_dictation_target(raw_url: &str) -> Result<OpenAiDictationTarget> {
     let (host, query_params, has_v1) = parse_openai_base_url(raw_url)?;
     let endpoint_path = if has_v1 {
@@ -230,6 +234,7 @@ fn openai_dictation_target(raw_url: &str) -> Result<OpenAiDictationTarget> {
     Ok((host, query_params, endpoint_path))
 }
 
+#[cfg(not(feature = "onprem"))]
 fn resolve_openai_base_url_target(raw_url: Option<&str>) -> Result<Option<OpenAiDictationTarget>> {
     raw_url
         .map(str::trim)
@@ -714,9 +719,13 @@ fn resolve_model_native_config(
 mod tests {
     use super::{
         all_providers, build_api_client, get_provider_def, normalize_openrouter_base_url,
-        openai_dictation_target, parse_model_transcription_response, parse_transcription_response,
-        resolve_openai_base_url_target, DictationProvider, MAX_TRANSCRIPTION_ERROR_PREVIEW_BYTES,
-        MAX_TRANSCRIPTION_RESPONSE_BYTES, OPENAI_VERSIONLESS_TRANSCRIPTIONS_PATH,
+        parse_model_transcription_response, parse_transcription_response, DictationProvider,
+        MAX_TRANSCRIPTION_ERROR_PREVIEW_BYTES, MAX_TRANSCRIPTION_RESPONSE_BYTES,
+    };
+    #[cfg(not(feature = "onprem"))]
+    use super::{
+        openai_dictation_target, resolve_openai_base_url_target,
+        OPENAI_VERSIONLESS_TRANSCRIPTIONS_PATH,
     };
     use test_case::test_case;
     use wiremock::matchers::{method, path};
@@ -747,6 +756,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "onprem"))]
     fn openai_dictation_target_preserves_prefix_and_query_params() {
         let (host, query_params, endpoint_path) = openai_dictation_target(
             "https://user:pass@gateway.example.com/openai/v1?api-version=2024-02-01",
@@ -761,6 +771,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "onprem"))]
     fn openai_dictation_target_uses_versionless_endpoint_without_v1() {
         let (host, query_params, endpoint_path) =
             openai_dictation_target("https://gateway.example.com/custom/api").unwrap();
@@ -770,6 +781,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "onprem"))]
     fn openai_dictation_target_keeps_v1_endpoint_for_bare_host() {
         let (host, query_params, endpoint_path) =
             openai_dictation_target("https://api.openai.com").unwrap();
@@ -779,6 +791,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "onprem"))]
     fn resolve_openai_base_url_target_ignores_blank_values() {
         assert!(resolve_openai_base_url_target(Some("   "))
             .unwrap()
