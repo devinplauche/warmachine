@@ -298,6 +298,7 @@ impl McpClientTrait for DeveloperClient {
 mod tests {
     use super::*;
     use crate::session::SessionManager;
+    #[cfg(not(feature = "onprem"))]
     use rmcp::model::ContentBlock;
     use rmcp::object;
     use std::fs;
