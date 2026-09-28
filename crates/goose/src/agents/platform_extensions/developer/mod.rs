@@ -18,9 +18,9 @@ use rmcp::model::{
 };
 use schemars::{schema_for, JsonSchema};
 use serde_json::Value;
-use shell::{ShellParams, ShellTool};
 #[cfg(not(feature = "onprem"))]
 use shell::{shell_display_name, ShellOutput};
+use shell::{ShellParams, ShellTool};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tree::{TreeParams, TreeTool};
