@@ -3,12 +3,12 @@ use std::sync::Arc;
 use std::sync::RwLock;
 
 use super::base::{Provider, ProviderMetadata};
-#[cfg(feature = "aws-providers")]
+#[cfg(all(feature = "aws-providers", not(feature = "onprem")))]
 use super::bedrock::BedrockProvider;
-#[cfg(feature = "local-inference")]
+#[cfg(all(feature = "local-inference", not(feature = "onprem")))]
 use super::local_inference::LocalInferenceProvider;
 use super::provider_registry::ProviderRegistry;
-#[cfg(feature = "aws-providers")]
+#[cfg(all(feature = "aws-providers", not(feature = "onprem")))]
 use super::sagemaker_tgi::SageMakerTgiProvider;
 #[cfg(not(feature = "onprem"))]
 use super::{

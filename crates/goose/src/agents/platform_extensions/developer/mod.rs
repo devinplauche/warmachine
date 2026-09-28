@@ -338,6 +338,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "onprem"))]
     fn first_text(result: &CallToolResult) -> &str {
         match &result.content[0] {
             ContentBlock::Text(text) => &text.text,

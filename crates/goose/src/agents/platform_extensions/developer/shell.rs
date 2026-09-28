@@ -377,7 +377,7 @@ impl ShellTool {
             .await
     }
 
-    #[cfg_attr(feature = "onprem", allow(unused_variables))]
+    #[cfg_attr(feature = "onprem", allow(unused_variables, unreachable_code))]
     pub(crate) async fn shell_with_cwd_and_emitter(
         &self,
         params: ShellParams,
