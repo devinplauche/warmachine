@@ -2183,13 +2183,20 @@ fn prompt_tool_confirmation(request: &ToolConfirmationRequest) -> Result<Permiss
     };
 
     let permission_result = if request.prompt.is_none() {
-        cliclack::select(prompt)
-            .item(Permission::AllowOnce, "Allow", "Allow the tool call once")
-            .item(
-                Permission::AlwaysAllow,
-                "Always Allow",
-                "Always allow the tool call",
-            )
+        let select = cliclack::select(prompt).item(
+            Permission::AllowOnce,
+            "Allow",
+            "Allow the tool call once",
+        );
+        // On-prem builds have no durable "always allow" grant: every approval
+        // is per tool call, fail-closed (see ONPREM.md).
+        #[cfg(not(feature = "onprem"))]
+        let select = select.item(
+            Permission::AlwaysAllow,
+            "Always Allow",
+            "Always allow the tool call",
+        );
+        select
             .item(Permission::DenyOnce, "Deny", "Deny the tool call")
             .item(
                 Permission::Cancel,

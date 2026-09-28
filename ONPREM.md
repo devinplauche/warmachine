@@ -28,11 +28,11 @@ The `onprem` cargo feature (in the `warmachine`, `goose-providers`, and
 | Provider registry | Only the OpenAI-compatible provider is registered. Cloud providers, ACP CLIs, and custom/declarative providers are not registered at all. |
 | Telemetry export | OTLP exporter endpoints must pass the network allowlist — an unallowlisted endpoint refuses to initialize, so traces can't leave the enclave. Langfuse is disabled unless its URL is on the allowlist. (Product telemetry was already permanently disabled.) |
 | Session sharing | Nostr session publishing is disabled (default relays are public). |
-| Remote MCP servers | `StreamableHttp` extension URIs must be on the allowlist. Unix-socket transports are local IPC and exempt. |
+| Remote MCP servers | `StreamableHttp` extension URIs must be on the allowlist. Unix-socket transports are local IPC and exempt. If a server issues an OAuth challenge, every discovered authorization/token/registration URL must also be on the allowlist (fail-closed); OAuth redirects are never followed. |
 | Voice dictation | Cloud STT endpoints are not allowlisted, so dictation fails closed. |
-| Audit log | Every model request appends a hash-chained entry; session start/end, extension installs/removals, session exports, every tool call (allowed/denied), keychain failures, and audit verifications are logged too (see below). |
+| Audit log | Every model request appends a hash-chained entry; session start/end, extension installs/removals, session exports, every tool call (allowed/denied), permission grants, recipe executions, keychain failures, and audit verifications are logged too (see below). |
 | At-rest encryption | Session message payloads in `sessions.db` are sealed with AES-256-GCM (see below). |
-| Sealed metadata | Session titles, working directory, and recipe parameters are sealed at rest like message payloads — they can carry CUI (project names, paths, ticket IDs). |
+| Sealed metadata | Session titles, working directory, recipe parameters, recipe definitions, and extension configs (which carry MCP API keys and bearer tokens) are sealed at rest like message payloads — they can carry CUI (project names, paths, ticket IDs, credentials). |
 | Secret storage | The OS keychain is mandatory: `WARMACHINE_DISABLE_KEYRING` is ignored and an unreachable keychain fails closed. |
 | Tool approvals | Every shell/web tool call requires explicit human approval (see below). |
 | FIPS 140-3 | TLS uses the FIPS-validated AWS-LC module (cert #4816); the binary refuses to start if FIPS mode is not active (see below). |
@@ -92,9 +92,12 @@ Two entry shapes, both hash-chained:
 
 - **Events**: `ts`, `event` (`session_start`, `session_end`,
   `extension_added`, `extension_removed`, `session_export`, `tool_call`,
+  `permission_grant`, `recipe_execute`,
   `keychain_failure`, `audit_verified`, `audit_cursor_tamper`,
   `sessions_purged`), `session_id`, `details` (small metadata — tool name
-  and allow/deny decision for `tool_call`, never tool arguments or results),
+  and allow/deny decision for `tool_call`, tool name and grant type for
+  `permission_grant`, recipe title and source for `recipe_execute`; never
+  tool arguments, results, or recipe parameters),
   `prev_hash`, `entry_hash`, where
 
   ```
@@ -156,10 +159,12 @@ message payloads are **encrypted at rest** in the on-prem build:
   plaintext ages out through normal use. GCM also integrity-protects each
   row: tampered rows fail to open instead of decrypting to garbage.
 - Sealing covers more than message bodies: the LLM-generated **session
-  title** (`sessions.name`), the **working directory**, and **recipe
-  parameters** (`user_recipe_values_json`) are sealed too — all three can
-  carry CUI (project names, filesystem paths, ticket IDs) and all three
-  used to rest in plaintext.
+  title** (`sessions.name`), the **working directory**, **recipe
+  parameters** (`user_recipe_values_json`), **recipe definitions**
+  (`sessions.recipe_json`), and **extension configuration**
+  (`sessions.extension_data` — MCP server env vars and HTTP headers, which
+  carry API keys and bearer tokens) are sealed too — all five can carry
+  CUI or credentials and all five used to rest in plaintext.
 - Because payloads are sealed, keyword search (`session list --match`,
   chat-recall) decrypts candidates in memory and matches in Rust instead of
   in SQL. Results are identical; large histories are somewhat slower.
@@ -189,7 +194,9 @@ is not.
 Every tool invocation — allowed or denied — is written to the audit log
 (`tool_call` event with tool name, session id, and decision; arguments and
 results never enter the log), in both the legacy and state-machine agent
-loops.
+loops, plus ACP app-tool dispatches and code-execution tool sub-calls.
+Durable permission grants (`permission_grant` event) and recipe executions
+(`recipe_execute` event, identity only) are logged as well.
 
 The **shell tool is removed entirely** in on-prem builds — it is not
 registered, so the model never sees it, and direct invocations (including
@@ -201,7 +208,11 @@ rather than sandbox-gated. Run commands in your own terminal.
 Operational notes:
 
 - Approvals are per tool call, in the interactive CLI. There is no
-  pre-approval list or "allow always" escape hatch in the on-prem build.
+  pre-approval list or "allow always" escape hatch in the on-prem build:
+  the prompt offers Allow / Deny / Cancel only, `warmachine configure`
+  cannot set a standing grant, and a stored `always_allow` entry (e.g. a
+  hand-edited config file) degrades to ask-before at read time. Grant
+  attempts are audit-logged (`permission_grant`).
 - Headless use (recipes, `warmachine run`, scheduled jobs) will stall at the
   approval prompt with no one to answer it. If you run unattended workflows,
   route them through a supervised session or accept that tool calls block.
@@ -323,7 +334,9 @@ to a SIEM:
   `entry_hash`, so restarts resume without duplicates. If the cursor's MAC
   fails verification, the forwarder logs loudly, writes an
   `audit_cursor_tamper` event into the audit log, and resumes from the
-  pre-tamper tail so the tamper alert itself is forwarded.
+  pre-tamper tail so the tamper alert itself is forwarded. Non-JSON cursor
+  content is treated as tamper too (full re-forward — safe duplication),
+  so there is no unprotected legacy cursor format to downgrade to.
 - At startup the baked-in sink URL is validated against the network
   allowlist and must use `https`; on mismatch the forwarder refuses to
   start (loud error, local log unaffected).

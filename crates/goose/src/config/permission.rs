@@ -145,6 +145,12 @@ impl PermissionManager {
                 .always_allow
                 .contains(&principal_name.to_string())
             {
+                // On-prem builds have no "allow always" escape hatch: a stored
+                // standing grant (e.g. hand-edited config) degrades to
+                // ask-before instead of being honored. Fail-closed.
+                #[cfg(feature = "onprem")]
+                return Some(PermissionLevel::AskBefore);
+                #[cfg(not(feature = "onprem"))]
                 return Some(PermissionLevel::AlwaysAllow);
             } else if permission_config
                 .ask_before

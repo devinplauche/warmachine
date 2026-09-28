@@ -1,6 +1,7 @@
 use super::*;
 use crate::agents::extension_manager::{get_parameter_names, is_tool_owned_by_extension};
 use crate::agents::reply_parts::is_tool_visible_to_app;
+use crate::agents::tool_execution::audit_tool_call;
 use crate::config::permission::PermissionLevel;
 use goose_sdk_types::custom_requests::{ToolListItem, ToolPermissionLevel};
 use rmcp::model::CallToolRequestParams;
@@ -70,10 +71,12 @@ impl GooseAcpAgent {
         let Some(tool) = tools.iter().find(|tool| {
             *tool.name == req.name && is_tool_owned_by_extension(tool, &req.extension_name)
         }) else {
+            audit_tool_call(req.name.as_str(), session_id, "denied");
             return Err(agent_client_protocol::Error::invalid_params().data("tool not found"));
         };
 
         if !is_tool_visible_to_app(tool) {
+            audit_tool_call(tool.name.as_ref(), session_id, "denied");
             return Err(agent_client_protocol::Error::invalid_params()
                 .data("tool is not visible to app clients"));
         }
@@ -82,6 +85,7 @@ impl GooseAcpAgent {
             serde_json::Value::Object(map) => Some(map),
             serde_json::Value::Null => None,
             _ => {
+                audit_tool_call(req.name.as_str(), session_id, "denied");
                 return Err(agent_client_protocol::Error::invalid_params()
                     .data("tool arguments must be an object"));
             }
@@ -96,6 +100,7 @@ impl GooseAcpAgent {
         };
 
         if agent.goose_mode().await != GooseMode::Auto {
+            audit_tool_call(tool.name.as_ref(), session_id, "denied");
             return Err(agent_client_protocol::Error::invalid_params()
                 .data("app tool calls require auto mode"));
         }
@@ -114,6 +119,7 @@ impl GooseAcpAgent {
             Some(session.working_dir),
             None,
         );
+        audit_tool_call(tool.name.as_ref(), session_id, "allowed");
         let tool_result = agent
             .extension_manager
             .dispatch_app_tool_call(

@@ -1861,26 +1861,30 @@ pub async fn configure_tool_permissions_dialog() -> anyhow::Result<()> {
     };
 
     // Allow user to set the permission level
-    let permission = cliclack::select(format!(
+    let permission_select = cliclack::select(format!(
         "Set permission level for tool {}, current permission level: {}",
         tool.name, current_permission
-    ))
-    .item(
+    ));
+    // On-prem builds have no durable "always allow" grant: every approval
+    // is per tool call, fail-closed (see ONPREM.md).
+    #[cfg(not(feature = "onprem"))]
+    let permission_select = permission_select.item(
         "always_allow",
         "Always Allow",
         "Allow this tool to execute without asking",
-    )
-    .item(
-        "ask_before",
-        "Ask Before",
-        "Prompt before executing this tool",
-    )
-    .item(
-        "never_allow",
-        "Never Allow",
-        "Prevent this tool from executing",
-    )
-    .interact()?;
+    );
+    let permission = permission_select
+        .item(
+            "ask_before",
+            "Ask Before",
+            "Prompt before executing this tool",
+        )
+        .item(
+            "never_allow",
+            "Never Allow",
+            "Prevent this tool from executing",
+        )
+        .interact()?;
 
     let permission_label = match permission {
         "always_allow" => "Always Allow",

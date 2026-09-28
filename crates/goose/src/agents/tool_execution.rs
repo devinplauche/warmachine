@@ -170,6 +170,31 @@ pub fn audit_tool_call(tool: &str, session_id: &str, decision: &str) {
 #[cfg(not(feature = "onprem"))]
 pub fn audit_tool_call(_tool: &str, _session_id: &str, _decision: &str) {}
 
+/// On-prem audit hook: one `permission_grant` event per durable standing
+/// grant recorded in the permission manager. A one-time allow leaves no such
+/// grant, so the trail distinguishes a one-time decision from a durable
+/// "always allow"/"never allow" grant. Carries identity only: tool name,
+/// session id, and grant kind — never tool arguments or results. Best-effort:
+/// a failed audit write warns but never fails the grant.
+///
+/// Called from the approval-decision points that record durable grants: the
+/// interactive approval path in this module and the state machine's
+/// tool-approval operation.
+#[cfg(feature = "onprem")]
+pub fn audit_permission_grant(tool: &str, session_id: &str, grant: &str) {
+    if let Err(e) = crate::onprem::audit_event(
+        "permission_grant",
+        Some(session_id),
+        &serde_json::json!({"tool": tool, "grant": grant}),
+    ) {
+        tracing::warn!("audit log write failed: {e:#}");
+    }
+}
+
+/// Non-on-prem builds keep no audit trail; the hook compiles away.
+#[cfg(not(feature = "onprem"))]
+pub fn audit_permission_grant(_tool: &str, _session_id: &str, _grant: &str) {}
+
 impl Agent {
     pub(super) fn handle_approval_tool_requests<'a>(
         &'a self,
@@ -248,6 +273,7 @@ impl Agent {
                         self.tool_inspection_manager
                             .update_permission_manager(&tool_call.name, PermissionLevel::AlwaysAllow)
                             .await;
+                        audit_permission_grant(&tool_call.name, &session.id, "always_allow");
                     }
                 } else {
                     audit_tool_call(tool_call.name.as_ref(), &session.id, "denied");
@@ -263,6 +289,7 @@ impl Agent {
                         self.tool_inspection_manager
                             .update_permission_manager(&tool_call.name, PermissionLevel::NeverAllow)
                             .await;
+                        audit_permission_grant(&tool_call.name, &session.id, "never_allow");
                     }
                 }
             }

@@ -10,6 +10,7 @@ use crate::agents::state_machine::{
     applied, messages_since_kickoff, not_applicable, ConversationEffect, Emitter, GooseEffect,
     Operation, OperationResult,
 };
+use crate::agents::tool_execution::audit_permission_grant;
 use crate::config::permission::PermissionLevel;
 use crate::config::GooseMode;
 use crate::conversation::message::{ActionRequiredData, Message, MessageContent, ToolRequest};
@@ -69,10 +70,12 @@ impl Operation<Session, GooseEffect> for ToolApprovalOperation<'_> {
                     self.tool_inspection_manager
                         .update_permission_manager(&tool_name, PermissionLevel::AlwaysAllow)
                         .await;
+                    audit_permission_grant(&tool_name, &session.id, "always_allow");
                 } else if pending.permission == Permission::AlwaysDeny {
                     self.tool_inspection_manager
                         .update_permission_manager(&tool_name, PermissionLevel::NeverAllow)
                         .await;
+                    audit_permission_grant(&tool_name, &session.id, "never_allow");
                 }
             }
 

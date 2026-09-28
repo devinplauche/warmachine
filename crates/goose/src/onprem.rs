@@ -331,6 +331,30 @@ fn ensure_audit_dir(log_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Re-tighten an existing audit file to owner-only (0o600 on unix).
+///
+/// `OpenOptions::mode(0o600)` applies only at file creation: a file left at
+/// 0o644 by a pre-hardening build keeps its group/other bits until
+/// explicitly re-secured. chmod is cheap, so audit writers call this
+/// unconditionally after every open of a file this build owns.
+#[cfg(unix)]
+fn ensure_owner_only(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return;
+    };
+    if metadata.permissions().mode() & 0o077 != 0 {
+        if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+            tracing::error!("cannot tighten permissions on {}: {e:#}", path.display());
+        }
+    }
+}
+
+/// No-op on platforms without unix permissions: the directory/file ACLs are
+/// inherited from the parent instead.
+#[cfg(not(unix))]
+fn ensure_owner_only(_path: &Path) {}
+
 /// Exclusive cross-process guard for the audit-log critical section
 /// (predecessor-hash read → rotation → append). Without it, two CLI processes
 /// appending concurrently fork the hash chain and the second entry fails
@@ -463,6 +487,7 @@ fn write_entry_line(log_path: &Path, entry: &serde_json::Value) -> Result<()> {
     let mut file = opts
         .open(log_path)
         .with_context(|| format!("cannot open audit log {}", log_path.display()))?;
+    ensure_owner_only(log_path);
     writeln!(file, "{entry}")
         .with_context(|| format!("cannot write audit log {}", log_path.display()))?;
     Ok(())
@@ -482,6 +507,7 @@ fn write_checkpoint(log_path: &Path, count: usize, entry_hash: &str) -> Result<(
     let mut file = opts
         .open(&cp_path)
         .with_context(|| format!("cannot open audit checkpoint {}", cp_path.display()))?;
+    ensure_owner_only(&cp_path);
     let record = serde_json::json!({"count": count, "entry_hash": entry_hash});
     writeln!(file, "{record}")
         .with_context(|| format!("cannot write audit checkpoint {}", cp_path.display()))?;
@@ -858,11 +884,6 @@ fn read_forward_cursor() -> Option<String> {
     if raw.is_empty() {
         return None;
     }
-    if !raw.starts_with('{') {
-        // Legacy plain-hash cursor (pre-integrity builds): accept once; the
-        // next successful forward rewrites it in the protected format.
-        return Some(raw);
-    }
     let (cursor, mac) = match serde_json::from_str::<serde_json::Value>(&raw) {
         Ok(doc) => match (
             doc.get("cursor").and_then(|v| v.as_str()),
@@ -935,6 +956,7 @@ fn write_forward_cursor(entry_hash: &str) -> Result<()> {
     let mut file = opts
         .open(&path)
         .with_context(|| format!("cannot write audit cursor {}", path.display()))?;
+    ensure_owner_only(&path);
     writeln!(file, "{doc}")
         .with_context(|| format!("cannot write audit cursor {}", path.display()))?;
     Ok(())

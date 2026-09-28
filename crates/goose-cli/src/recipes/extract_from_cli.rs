@@ -18,6 +18,19 @@ pub fn extract_recipe_info_from_cli(
         eprintln!("{}: {}", console::style("Error").red().bold(), err);
         std::process::exit(1);
     });
+
+    // On-prem audit: record the recipe's identity when it is loaded for
+    // execution. Recipe parameter values are sealed CUI and never enter the
+    // audit log — title and source identifier only.
+    #[cfg(feature = "onprem")]
+    if let Err(e) = warmachine::onprem::audit_event(
+        "recipe_execute",
+        None,
+        &serde_json::json!({"title": recipe.title, "source": recipe_name}),
+    ) {
+        tracing::warn!("audit log write failed: {e:#}");
+    }
+
     if !quiet {
         print_recipe_info(&recipe, params);
     }

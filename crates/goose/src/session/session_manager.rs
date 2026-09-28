@@ -871,7 +871,10 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
         use sqlx::Row;
 
         let recipe_json: Option<String> = row.try_get("recipe_json")?;
-        let recipe = recipe_json.and_then(|json| serde_json::from_str(&json).ok());
+        let recipe = recipe_json.and_then(|json| {
+            let opened = open_session_column(&json).ok()?;
+            serde_json::from_str(&opened).ok()
+        });
 
         let user_recipe_values_json: Option<String> = row.try_get("user_recipe_values_json")?;
         let user_recipe_values = match user_recipe_values_json {
@@ -926,8 +929,12 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
             session_type,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
-            extension_data: serde_json::from_str(&row.try_get::<String, _>("extension_data")?)
-                .unwrap_or_default(),
+            extension_data: {
+                let stored: String = row.try_get("extension_data")?;
+                let opened = open_session_column(&stored)
+                    .map_err(|e| sqlx::Error::Decode(e.to_string().into()))?;
+                serde_json::from_str(&opened).unwrap_or_default()
+            },
             usage: Usage {
                 input_tokens: row.try_get("input_tokens")?,
                 output_tokens: row.try_get("output_tokens")?,
@@ -1263,7 +1270,7 @@ impl SessionStorage {
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
         let recipe_json = match &session.recipe {
-            Some(recipe) => Some(serde_json::to_string(recipe)?),
+            Some(recipe) => Some(seal_json_column(&serde_json::to_string(recipe)?)?),
             None => None,
         };
 
@@ -1300,7 +1307,9 @@ impl SessionStorage {
         .bind(seal_string_column(&session.working_dir.to_string_lossy())?)
         .bind(session.created_at)
         .bind(session.updated_at)
-        .bind(serde_json::to_string(&session.extension_data)?)
+        .bind(seal_json_column(&serde_json::to_string(
+            &session.extension_data,
+        )?)?)
         .bind(session.usage.total_tokens)
         .bind(session.usage.input_tokens)
         .bind(session.usage.output_tokens)
@@ -1744,11 +1753,14 @@ impl SessionStorage {
         // than the cutoff are purged. Compiled in, so it cannot be disabled.
         // Best-effort: a purge failure must not fail session creation.
         #[cfg(feature = "onprem")]
-        let _ = async {
+        if let Err(e) = async {
             let cutoff = crate::onprem::session_retention_cutoff()?;
             self.purge_expired_sessions(cutoff).await
         }
-        .await;
+        .await
+        {
+            warn!("on-prem retention purge failed, freed pages may still hold CUI: {e:#}");
+        }
         Ok(session)
     }
 
@@ -1873,7 +1885,7 @@ impl SessionStorage {
             q = q.bind(seal_string_column(&wd.to_string_lossy())?);
         }
         if let Some(ed) = builder.extension_data {
-            q = q.bind(serde_json::to_string(&ed)?);
+            q = q.bind(seal_json_column(&serde_json::to_string(&ed)?)?);
         }
         if let Some(u) = builder.usage {
             q = q
@@ -1898,7 +1910,9 @@ impl SessionStorage {
             q = q.bind(sid);
         }
         if let Some(recipe) = builder.recipe {
-            let recipe_json = recipe.map(|r| serde_json::to_string(&r)).transpose()?;
+            let recipe_json = recipe
+                .map(|r| seal_json_column(&serde_json::to_string(&r)?))
+                .transpose()?;
             q = q.bind(recipe_json);
         }
         if let Some(user_recipe_values) = builder.user_recipe_values {

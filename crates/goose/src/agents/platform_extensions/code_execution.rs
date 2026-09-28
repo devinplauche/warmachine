@@ -379,15 +379,30 @@ fn create_tool_callback(
             };
 
             let handle = rt.spawn(async move {
+                let tool_name = tool_call.name.to_string();
                 match manager
                     .dispatch_tool_call(&ctx, tool_call, cancellation_token)
                     .await
                 {
-                    Ok(dispatch_result) => match dispatch_result.result.await {
-                        Ok(result) => Ok(callback_result_to_value(&result)),
-                        Err(e) => Err(format!("Tool error: {}", e.message)),
-                    },
-                    Err(e) => Err(format!("Dispatch error: {e}")),
+                    Ok(dispatch_result) => {
+                        crate::agents::tool_execution::audit_tool_call(
+                            tool_name.as_str(),
+                            &ctx.session_id,
+                            "allowed",
+                        );
+                        match dispatch_result.result.await {
+                            Ok(result) => Ok(callback_result_to_value(&result)),
+                            Err(e) => Err(format!("Tool error: {}", e.message)),
+                        }
+                    }
+                    Err(e) => {
+                        crate::agents::tool_execution::audit_tool_call(
+                            tool_name.as_str(),
+                            &ctx.session_id,
+                            "denied",
+                        );
+                        Err(format!("Dispatch error: {e}"))
+                    }
                 }
             });
 

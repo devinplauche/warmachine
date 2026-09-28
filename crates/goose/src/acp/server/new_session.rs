@@ -60,6 +60,21 @@ impl GooseAcpAgent {
             .create_session(args.cwd.clone(), session_name, session_type, current_mode)
             .await
             .internal_err_ctx("Failed to create session")?;
+
+        // On-prem audit: record the recipe's identity when a session starts
+        // from a recipe. Recipe parameter values are sealed CUI and never
+        // enter the audit log — title only.
+        #[cfg(feature = "onprem")]
+        if let Some((ref recipe, _)) = recipe {
+            if let Err(e) = crate::onprem::audit_event(
+                "recipe_execute",
+                Some(&session.id),
+                &serde_json::json!({"title": recipe.title}),
+            ) {
+                tracing::warn!("audit log write failed: {e:#}");
+            }
+        }
+
         match self
             .finish_new_session_setup(cx, config, &session, args, recipe, meta)
             .await

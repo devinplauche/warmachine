@@ -8,6 +8,11 @@ use axum::routing::get;
 use axum::Router;
 use minijinja::{context, Environment};
 use oauth2::{Scope, TokenResponse};
+#[cfg(feature = "onprem")]
+use rmcp::transport::auth::{
+    default_oauth_http_client, OAuthHttpClient, OAuthHttpClientError, OAuthHttpClientFuture,
+    OAuthHttpRedirectPolicy, OAuthHttpRequest,
+};
 use rmcp::transport::auth::{
     AuthError, AuthorizationRequest, CredentialStore, OAuthClientConfig, OAuthState,
     OAuthTokenResponse, StoredCredentials, WWWAuthenticateParams,
@@ -302,6 +307,90 @@ fn build_authorization_request(
     request
 }
 
+/// On-prem builds only: wraps rmcp's default OAuth HTTP client so every
+/// outbound request from the OAuth state machine (RFC 9728 protected-resource
+/// discovery, authorization-server metadata, dynamic client registration,
+/// token exchange and refresh) is checked against the compile-time network
+/// allowlist before it leaves the process. A compromised allowlisted MCP
+/// server could otherwise advertise an external authorization server and pull
+/// credential material (client identity, auth codes, tokens) out to it.
+///
+/// Loopback URLs stay exempt: they are on-device IPC, not network egress
+/// (the same reason the unix-socket MCP transport is exempt from the
+/// allowlist). Redirect following is disabled so a 3xx can never re-issue a
+/// request to a server-advertised Location: rmcp turns the 3xx into an error
+/// and the flow fails closed instead. Discovery already handles same-origin
+/// redirects itself, re-issuing each hop through this wrapper.
+#[cfg(feature = "onprem")]
+struct AllowlistedOAuthHttpClient {
+    inner: Box<dyn OAuthHttpClient>,
+}
+
+#[cfg(feature = "onprem")]
+impl AllowlistedOAuthHttpClient {
+    fn new() -> Result<Self, AuthError> {
+        Ok(Self {
+            inner: Box::new(default_oauth_http_client()?),
+        })
+    }
+
+    fn is_loopback(url: &str) -> bool {
+        let host = url::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_ascii_lowercase));
+        matches!(host.as_deref(), Some("localhost" | "127.0.0.1" | "::1"))
+    }
+}
+
+#[cfg(feature = "onprem")]
+impl OAuthHttpClient for AllowlistedOAuthHttpClient {
+    fn execute(&self, mut request: OAuthHttpRequest) -> OAuthHttpClientFuture<'_> {
+        Box::pin(async move {
+            check_oauth_url_allowed(&request.request.uri().to_string())?;
+            request.redirect_policy = OAuthHttpRedirectPolicy::Stop;
+            self.inner.execute(request).await
+        })
+    }
+}
+
+/// On-prem gate for OAuth URLs: loopback is on-device, everything else must
+/// be on the compile-time allowlist. Fails closed.
+#[cfg(feature = "onprem")]
+fn check_oauth_url_allowed(url: &str) -> Result<(), OAuthHttpClientError> {
+    if AllowlistedOAuthHttpClient::is_loopback(url) {
+        return Ok(());
+    }
+    crate::onprem::check_url_allowed(url).map_err(|error| {
+        Box::new(BlockedOAuthUrl(format!(
+            "on-prem OAuth URL blocked: {error:#}"
+        ))) as OAuthHttpClientError
+    })
+}
+
+/// Rejection from [`check_oauth_url_allowed`]. A dedicated type because
+/// `anyhow::Error` deliberately does not implement `std::error::Error`, which
+/// the rmcp [`OAuthHttpClient`] contract requires.
+#[cfg(feature = "onprem")]
+#[derive(Debug)]
+struct BlockedOAuthUrl(String);
+
+#[cfg(feature = "onprem")]
+impl std::fmt::Display for BlockedOAuthUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[cfg(feature = "onprem")]
+impl std::error::Error for BlockedOAuthUrl {}
+
+/// Build the HTTP client for rmcp's OAuth state machine: allowlist-enforcing
+/// under on-prem, rmcp's default otherwise.
+#[cfg(feature = "onprem")]
+fn oauth_http_client() -> Result<std::sync::Arc<dyn OAuthHttpClient>, AuthError> {
+    Ok(std::sync::Arc::new(AllowlistedOAuthHttpClient::new()?))
+}
+
 pub async fn oauth_flow(
     mcp_server_url: &String,
     name: &String,
@@ -319,6 +408,11 @@ pub async fn oauth_flow_with_challenge(
     let env_client = env_static_oauth_client();
     let static_client = static_client.or(env_client.as_ref());
     let credential_store = GooseCredentialStore::new(name.clone());
+    #[cfg(feature = "onprem")]
+    let mut auth_manager =
+        AuthorizationManager::new_with_oauth_http_client(mcp_server_url, oauth_http_client()?)
+            .await?;
+    #[cfg(not(feature = "onprem"))]
     let mut auth_manager = AuthorizationManager::new(mcp_server_url).await?;
     auth_manager.set_credential_store(credential_store.clone());
 
@@ -377,6 +471,13 @@ pub async fn oauth_flow_with_challenge(
                         .save_with_requested_scopes(refreshed_credentials, requested_scopes)?;
 
                     if restored_omitted_scopes {
+                        #[cfg(feature = "onprem")]
+                        let mut oauth_state = OAuthState::new_with_oauth_http_client(
+                            mcp_server_url,
+                            oauth_http_client()?,
+                        )
+                        .await?;
+                        #[cfg(not(feature = "onprem"))]
                         let mut oauth_state = OAuthState::new(mcp_server_url, None).await?;
                         oauth_state
                             .set_credentials(&refreshed_client_id, token_response)
@@ -449,6 +550,10 @@ pub async fn oauth_flow_with_challenge(
         }
     });
 
+    #[cfg(feature = "onprem")]
+    let mut oauth_state =
+        OAuthState::new_with_oauth_http_client(mcp_server_url, oauth_http_client()?).await?;
+    #[cfg(not(feature = "onprem"))]
     let mut oauth_state = OAuthState::new(mcp_server_url, None).await?;
     let redirect_uri = format!("http://127.0.0.1:{}/oauth_callback", used_addr.port());
     oauth_state
@@ -462,6 +567,13 @@ pub async fn oauth_flow_with_challenge(
         .await?;
 
     let authorization_url = oauth_state.get_authorization_url().await?;
+    // The authorization endpoint is server-advertised and is the one OAuth
+    // URL rmcp never fetches itself (it is opened in the user's browser, or
+    // fetched by `complete_automatic_authorization`), so gate it here before
+    // either path can touch it.
+    #[cfg(feature = "onprem")]
+    check_oauth_url_allowed(authorization_url.as_str())
+        .map_err(|error| anyhow::anyhow!("refusing OAuth authorization URL: {error}"))?;
     let callback_url = async {
         if let Some(callback_url) =
             complete_automatic_authorization(authorization_url.as_str(), &redirect_uri).await?
