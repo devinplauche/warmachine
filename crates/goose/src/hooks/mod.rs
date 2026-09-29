@@ -1309,6 +1309,7 @@ mod tests {
         )
     }
 
+    #[cfg(not(feature = "onprem"))]
     async fn run_chain_with(
         event: HookEvent,
         actions: Vec<Value>,
