@@ -22,10 +22,16 @@ The `onprem` cargo feature (in the `warmachine`, `goose-providers`, and
 
 | Control | Mechanism |
 |---|---|
-| Endpoint | `WARMACHINE_ONPREM_BASE_URL` env var **at build time**. The build fails if it is unset, so an on-prem binary can never ship without an endpoint. `OPENAI_HOST` / `OPENAI_BASE_URL` overrides are ignored. |
-| Network allowlist | `goose_providers::onprem::check_url_allowed()` gates `ApiClient` construction — every provider HTTP request funnels through it. Origins outside the allowlist are refused. Plain `http` is rejected for non-loopback hosts (CUI/ITAR must be encrypted in transit). |
+| Endpoint | `WARMACHINE_ONPREM_BASE_URL` env var **at build time**. The build fails if it is unset, so an on-prem binary can never ship without an endpoint. Runtime path inputs such as `OPENAI_BASE_PATH` are still read, but every request URL is re-validated against the compile-time allowlist before it is sent (see below), so an override cannot steer requests — or the bearer token — off the allowlist. |
+| Network allowlist | `goose_providers::onprem::check_url_allowed()` gates `ApiClient` construction — every provider HTTP request funnels through it — **and** the fully assembled request URL is re-checked in `ApiClient::build_url` on every request, because WHATWG `Url::join` semantics let an absolute-URL path silently replace the host. Origins outside the allowlist are refused. Cross-origin redirects are never followed in on-prem builds (same-origin redirect policy), so a redirect cannot carry the Authorization header off the allowlist. Plain `http` is rejected for non-loopback hosts (CUI/ITAR must be encrypted in transit). |
 | Extra origins | `WARMACHINE_ONPREM_EXTRA_HOSTS` (optional, comma-separated) allowlists additional origins, e.g. an internal observability collector. |
-| Provider registry | Only the OpenAI-compatible provider is registered. Cloud providers, ACP CLIs, and custom/declarative providers are not registered at all. |
+| Provider registry | Only the OpenAI-compatible provider is registered. Cloud providers, ACP CLIs, and custom/declarative providers are not registered at all. The OpenAI Live protocol module (which dials api.openai.com) is compiled out, so live voice is unavailable in on-prem builds. |
+| Self-update | `onprem` implies the `disable-update` feature: `warmachine update` fails closed instead of pulling a binary from the public internet. |
+| Plugin hooks | Plugin shell hooks (`sh -c` commands embedded in plugin manifests) are hard-disabled in on-prem builds: the hook runner fails closed without executing, the shell-spawning machinery is compiled out, and every suppressed hook is audit-logged (`hook_suppressed` event). Plugins still load — only their shell hooks are suppressed. |
+| Headless approvals | Non-interactive runs fail closed instead of silently auto-allowing: `Approve`/`SmartApprove` modes error immediately (no terminal to prompt), and `Auto` — the default mode — also errors rather than granting every tool call. Run interactively, or set `WARMACHINE_MODE=chat` for a tool-free headless session. |
+| Plaintext diagnostics | LLM wire logs (`logs/llm_request.*.jsonl`), the `history.txt` prompt-history file, and large-tool-response spill files are never written to disk in on-prem builds — the writers are compiled out (history is kept in memory only, so in-session recall still works). A once-per-process sweep removes stale spill files left behind by non-on-prem builds. |
+| Model downloads | Hugging Face model search/resolve/download fails closed in on-prem builds — the network choke point refuses before dialing huggingface.co. Use a pre-seeded local model cache. |
+| Audit log | Every model request appends a hash-chained entry, including auxiliary model calls (session naming, summaries, permission judgments, tool-call labels, app-content completion) — recorded with a purpose label only, never request content. Session start/end, extension installs/removals, session exports, every tool call (allowed/denied), permission grants, recipe executions, keychain failures, suppressed plugin hooks, and audit verifications are logged too (see below). |
 | Telemetry export | OTLP exporter endpoints must pass the network allowlist — an unallowlisted endpoint refuses to initialize, so traces can't leave the enclave. Langfuse is disabled unless its URL is on the allowlist. (Product telemetry was already permanently disabled.) |
 | Session sharing | Nostr session publishing is disabled (default relays are public). |
 | Remote MCP servers | `StreamableHttp` extension URIs must be on the allowlist. Unix-socket transports are local IPC and exempt. If a server issues an OAuth challenge, every discovered authorization/token/registration URL must also be on the allowlist (fail-closed); OAuth redirects are never followed. |
@@ -90,14 +96,23 @@ Two entry shapes, both hash-chained:
   entry_hash = sha256(prev_hash | ts | session_id | model | endpoint | request_sha256)
   ```
 
+  Auxiliary (non-agent-loop) model calls — session naming, context
+  summaries, permission judgments, tool-call labels, app-content
+  completion — are logged the same way, except the payload is a short
+  **purpose label** (e.g. `"summarize"`), never request content: prompts and
+  responses can carry CUI, so they stay out of the audit log. The one-shot
+  helper (`complete_one_shot`) logs these centrally; the handful of direct
+  call sites log the same way. A logging failure is warned and never
+  propagated — a request must not fail because the audit write failed.
 - **Events**: `ts`, `event` (`session_start`, `session_end`,
   `extension_added`, `extension_removed`, `session_export`, `tool_call`,
   `permission_grant`, `recipe_execute`, `credential_set`, `credential_removed`,
-  `keychain_failure`, `audit_verified`, `audit_cursor_tamper`,
-  `sessions_purged`), `session_id`, `details` (small metadata — tool name
+  `keychain_failure`, `hook_suppressed`, `audit_verified`,
+  `audit_cursor_tamper`, `sessions_purged`), `session_id`, `details` (small metadata — tool name
   and allow/deny decision for `tool_call`, tool name and grant type for
   `permission_grant`, recipe title and source for `recipe_execute`, secret
-  key name for `credential_set` / `credential_removed`; never
+  key name for `credential_set` / `credential_removed`, hook event name and
+  plugin for `hook_suppressed`; never
   tool arguments, results, recipe parameters, or secret values),
   `prev_hash`, `entry_hash`, where
 
@@ -225,9 +240,13 @@ Operational notes:
   cannot set a standing grant, and a stored `always_allow` entry (e.g. a
   hand-edited config file) degrades to ask-before at read time. Grant
   attempts are audit-logged (`permission_grant`).
-- Headless use (recipes, `warmachine run`, scheduled jobs) will stall at the
-  approval prompt with no one to answer it. If you run unattended workflows,
-  route them through a supervised session or accept that tool calls block.
+- Headless use (recipes, `warmachine run`, scheduled jobs) **fails closed**
+  in on-prem builds: with no terminal to answer the prompt, `Approve` /
+  `SmartApprove` modes return an error immediately, and `Auto` — the
+  default mode — does the same instead of silently granting every tool
+  call. If you run unattended workflows, route them through a supervised
+  session or accept that tool calls are refused. A run that needs no tool
+  calls can set `WARMACHINE_MODE=chat` for a tool-free headless session.
 - A denied call is reported to the model as a tool error, not a crash — the
   session continues.
 
@@ -356,6 +375,42 @@ to a SIEM:
   local log is unaffected and entries are never lost. If no sink URL was
   baked in, the forwarder is a complete no-op.
 - First-run behavior: with no cursor, the forwarder ships the full history
-  (batched). If the cursor goes stale (log truncated/rotated), it anchors at
-  the current end; backfilling after an anomaly is a manual operator task
-  (`verify_audit_log` + any NDJSON shipper).
+  (batched). If the cursor goes stale (log truncated between passes, or the
+  cursor file deleted), it anchors at the current end; backfilling after an
+  anomaly is a manual operator task (`verify_audit_log` + any NDJSON
+  shipper).
+- Rotation handling: the forwarder replays rotated archives **chronologically
+  before** the live log. If the audit log rotated between passes and the
+  cursor is stranded in a rotated archive, the replay locates the cursor
+  there and continues through newer archives into the live file — entries
+  are no longer skipped after rotation. A rotation landing mid-pass can only
+  duplicate entries, which is safe because the cursor is content-addressed
+  by entry hash.
+
+## Known limitations
+
+Honest gaps and residual risks, kept current so operators plan around them:
+
+- **Desktop prompt history.** The CLI keeps prompt history in memory only,
+  but the **desktop app** has no compile-time `onprem` flag and still
+  persists its own prompt history to disk. A desktop bundle is therefore
+  not an on-prem build for this surface; the on-prem target is the CLI
+  binary until the desktop carries the same gate.
+- **External advisory not independently verified.** One dependency advisory
+  (GHSA-6mg9-3cvh-9939, cited in an external review) could not be
+  reproduced or independently confirmed: the advisory ID returned 404 from
+  public sources, and it does not appear in the RustSec database. It is
+  tracked as unverified, not as closed.
+- **No on-device audit of SIEM reception.** The forwarder is best-effort;
+  it does not confirm the SIEM received and persisted each batch. Treat
+  the local hash-chained log as the source of truth and reconcile with the
+  SIEM's copy operationally.
+- **Unsigned commits in the development workflow.** WarMachine is pushed via
+  the GitHub Git Database API with tree verification (byte-identical trees,
+  checked on every push), but the resulting commits are **unsigned**.
+  GPG/SSH-signed commits remain a nice-to-have for this pipeline.
+- **Auxiliary-call coverage is purpose-label only.** Suppressed-hook,
+  permission-judge, and other auxiliary audit entries record what ran and
+  whether it was allowed — they do not record prompts or outputs. If an
+  incident needs full request content, it lives only in the sealed
+  `sessions.db`, not the audit trail.

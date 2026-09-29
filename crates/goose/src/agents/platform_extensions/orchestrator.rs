@@ -359,6 +359,7 @@ impl OrchestratorClient {
             provider.as_ref(),
             &model_config,
             session_id,
+            "recipe_summary",
             system,
             &[user_message],
             &[],

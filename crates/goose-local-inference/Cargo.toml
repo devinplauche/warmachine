@@ -13,6 +13,9 @@ workspace = true
 
 [features]
 default = []
+# Compile-time marker forwarded (weakly) from goose-providers' `onprem`
+# feature so Hugging Face network access can fail closed in on-prem builds.
+onprem = []
 cuda = ["llama-cpp-2/cuda"]
 vulkan = ["llama-cpp-2/vulkan"]
 mlx = ["dep:safemlx", "dep:safemlx-lm", "dep:safemlx-lm-utils"]

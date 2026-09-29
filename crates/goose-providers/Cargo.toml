@@ -13,7 +13,10 @@ workspace = true
 
 [features]
 default = []
-onprem = []
+# Weakly forward `onprem` into goose-local-inference when it is enabled, so
+# Hugging Face downloads fail closed in on-prem builds. The `?` keeps this
+# from enabling the optional dependency on its own.
+onprem = ["goose-local-inference?/onprem"]
 local-inference = ["dep:goose-local-inference"]
 local-inference-hf-hub = ["local-inference", "goose-local-inference/hf-hub"]
 cuda = ["local-inference", "goose-local-inference/cuda"]

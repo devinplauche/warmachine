@@ -1,4 +1,4 @@
-#![cfg(feature = "live-websocket")]
+#![cfg(all(feature = "live-websocket", not(feature = "onprem")))]
 
 use anyhow::Result;
 use futures::{SinkExt, StreamExt};

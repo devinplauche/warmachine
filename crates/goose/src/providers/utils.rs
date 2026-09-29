@@ -1,13 +1,21 @@
-use crate::config::paths::Paths;
-use anyhow::{anyhow, Result};
-use fs_err::File;
-use goose_providers::request_log::{install_logger, RequestLogHandle, RequestLogger};
+use anyhow::Result;
 use serde_json::Value;
-use std::error::Error;
-use std::io::{BufWriter, Write};
-use std::path::PathBuf;
-use std::sync::OnceLock;
-use uuid::Uuid;
+
+// Everything the LLM wire-log writer needs. It is compiled out of on-prem
+// builds (see `init_goose_request_log`): request/response payloads can carry
+// CUI, and diagnostics-off is the fail-closed posture.
+#[cfg(not(feature = "onprem"))]
+use {
+    crate::config::paths::Paths,
+    anyhow::anyhow,
+    fs_err::File,
+    goose_providers::request_log::{install_logger, RequestLogHandle, RequestLogger},
+    std::error::Error,
+    std::io::{BufWriter, Write},
+    std::path::PathBuf,
+    std::sync::OnceLock,
+    uuid::Uuid,
+};
 
 pub fn filter_extensions_from_system_prompt(system: &str) -> String {
     let Some(extensions_start) = system.find("# Extensions") else {
@@ -89,22 +97,38 @@ fn unescape_json_values_in_place(value: &mut Value) {
     }
 }
 
+// Inert rotation parameter: how many llm_request.*.jsonl files the writer
+// keeps (and how many the diagnostics bundle includes). Not gated: it writes
+// nothing, and `session/diagnostics.rs` uses it for truncation logic in all
+// build variants. Under `onprem` no such files are ever created.
 pub const LOGS_TO_KEEP: usize = 10;
 
+#[cfg(not(feature = "onprem"))]
 static INIT_LOGGER: OnceLock<Result<()>> = OnceLock::new();
 
 pub fn init_goose_request_log() -> Result<()> {
-    INIT_LOGGER
-        .get_or_init(|| Ok(install_logger(RequestLog::new(LOGS_TO_KEEP)?)?))
-        .as_ref()
-        .map_err(|e| anyhow::anyhow!("failed to set up logger: {}", e))?;
+    // On-prem builds never persist LLM request/response wire logs to disk:
+    // the payloads can carry CUI, and diagnostics-off is the fail-closed
+    // posture. The file logger below is compiled out under `onprem`, so no
+    // logger is ever installed; `start_log` returns `Ok(None)` when no logger
+    // is installed, which makes every provider call site a no-op on its own.
+    // No code path requires the logger to exist.
+    #[cfg(not(feature = "onprem"))]
+    {
+        INIT_LOGGER
+            .get_or_init(|| Ok(install_logger(RequestLog::new(LOGS_TO_KEEP)?)?))
+            .as_ref()
+            .map_err(|e| anyhow::anyhow!("failed to set up logger: {}", e))?;
+    }
     Ok(())
 }
 
+#[cfg(not(feature = "onprem"))]
 pub struct RequestLog {
     logs_to_keep: usize,
 }
 
+#[cfg(not(feature = "onprem"))]
 impl RequestLog {
     pub fn new(logs_to_keep: usize) -> Result<Self> {
         let logs_dir = Paths::in_state_dir("logs");
@@ -113,12 +137,14 @@ impl RequestLog {
     }
 }
 
+#[cfg(not(feature = "onprem"))]
 struct FileLogHandle {
     writer: Option<BufWriter<File>>,
     temp_path: PathBuf,
     logs_to_keep: usize,
 }
 
+#[cfg(not(feature = "onprem"))]
 impl RequestLogger for RequestLog {
     fn start(&self) -> Result<Box<dyn RequestLogHandle>, Box<dyn Error + Send + Sync>> {
         let logs_dir = Paths::in_state_dir("logs");
@@ -144,6 +170,7 @@ impl RequestLogger for RequestLog {
     }
 }
 
+#[cfg(not(feature = "onprem"))]
 impl RequestLogHandle for FileLogHandle {
     fn write(&mut self, s: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         let writer = self
@@ -155,6 +182,7 @@ impl RequestLogHandle for FileLogHandle {
     }
 }
 
+#[cfg(not(feature = "onprem"))]
 impl FileLogHandle {
     fn finish(&mut self) -> Result<()> {
         if let Some(mut writer) = self.writer.take() {
@@ -177,6 +205,7 @@ impl FileLogHandle {
     }
 }
 
+#[cfg(not(feature = "onprem"))]
 impl Drop for FileLogHandle {
     fn drop(&mut self) {
         if std::thread::panicking() {

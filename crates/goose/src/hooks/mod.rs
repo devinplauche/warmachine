@@ -24,8 +24,12 @@
 //! context on stdin and SHOULD exit 0 on success.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(feature = "onprem"))]
+use std::path::PathBuf;
+#[cfg(not(feature = "onprem"))]
 use std::process::Stdio;
+#[cfg(not(feature = "onprem"))]
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -33,7 +37,9 @@ use anyhow::{Context, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(not(feature = "onprem"))]
 use tokio::io::AsyncWriteExt;
+#[cfg(not(feature = "onprem"))]
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 use tracing_futures::Instrument;
@@ -193,6 +199,8 @@ enum OnFailure {
 #[derive(Debug, Clone)]
 struct LoadedRule {
     plugin_name: String,
+    // Only used to spawn hook shells, which do not exist in on-prem builds.
+    #[cfg(not(feature = "onprem"))]
     plugin_root: PathBuf,
     matcher: Option<Regex>,
     actions: Vec<LoadedAction>,
@@ -495,8 +503,10 @@ impl HookManager {
             session.id = %session_id,
         );
         let result = run_command_hook(
+            event,
+            session_id,
+            rule,
             command,
-            &rule.plugin_root,
             payload,
             timeout,
             self.use_login_shell_path,
@@ -657,8 +667,10 @@ impl HookManager {
                     "Running plugin hook (banner-collecting)",
                 );
                 match run_command_hook(
+                    event,
+                    &ctx.session_id,
+                    rule,
                     command,
-                    &rule.plugin_root,
                     &payload,
                     *timeout,
                     self.use_login_shell_path,
@@ -968,7 +980,8 @@ fn classify_output(output: &std::process::Output) -> HookVerdict {
 fn load_hooks_file(
     path: &Path,
     plugin_name: &str,
-    plugin_root: &Path,
+    // Only used to spawn hook shells, which do not exist in on-prem builds.
+    _plugin_root: &Path,
 ) -> Result<HashMap<HookEvent, Vec<LoadedRule>>> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -1037,7 +1050,8 @@ fn load_hooks_file(
 
             out.entry(event).or_default().push(LoadedRule {
                 plugin_name: plugin_name.to_string(),
-                plugin_root: plugin_root.to_path_buf(),
+                #[cfg(not(feature = "onprem"))]
+                plugin_root: _plugin_root.to_path_buf(),
                 matcher,
                 actions,
             });
@@ -1048,23 +1062,61 @@ fn load_hooks_file(
 }
 
 async fn run_command_hook(
+    event: HookEvent,
+    session_id: &str,
+    rule: &LoadedRule,
     raw_command: &str,
-    plugin_root: &Path,
     payload: &str,
     timeout: Duration,
     use_login_shell_path: bool,
 ) -> Result<HookRun> {
-    match tokio::time::timeout(
-        timeout,
-        run_command_hook_inner(raw_command, plugin_root, payload, use_login_shell_path),
-    )
-    .await
+    // Fail closed: plugin shell hooks are never executed in on-prem builds.
+    // Compile-time gated, so there is no runtime switch that can re-enable it.
+    #[cfg(feature = "onprem")]
     {
-        Ok(res) => res,
-        Err(_) => anyhow::bail!("hook `{raw_command}` timed out after {:?}", timeout),
+        let _ = (raw_command, payload, timeout, use_login_shell_path);
+        warn!(
+            event = %event,
+            plugin = %rule.plugin_name,
+            "Plugin hook suppressed: shell hooks are disabled in on-prem builds",
+        );
+        if let Err(err) = crate::onprem::audit_event(
+            "hook_suppressed",
+            Some(session_id),
+            &serde_json::json!({
+                "hook_event": event.to_string(),
+                "plugin": rule.plugin_name,
+            }),
+        ) {
+            warn!(
+                error = %format!("{err:#}"),
+                "Failed to write hook-suppression audit event"
+            );
+        }
+        anyhow::bail!("plugin shell hooks are disabled in on-prem builds");
+    }
+
+    #[cfg(not(feature = "onprem"))]
+    {
+        let _ = (event, session_id, rule);
+        match tokio::time::timeout(
+            timeout,
+            run_command_hook_inner(
+                raw_command,
+                &rule.plugin_root,
+                payload,
+                use_login_shell_path,
+            ),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(_) => anyhow::bail!("hook `{raw_command}` timed out after {:?}", timeout),
+        }
     }
 }
 
+#[cfg(not(feature = "onprem"))]
 async fn run_command_hook_inner(
     raw_command: &str,
     plugin_root: &Path,
@@ -1108,6 +1160,7 @@ async fn run_command_hook_inner(
     })
 }
 
+#[cfg(not(feature = "onprem"))]
 fn hook_command(command: &str, plugin_root: &Path, path: Option<&str>) -> Command {
     #[cfg(not(windows))]
     {
@@ -1134,6 +1187,7 @@ fn hook_command(command: &str, plugin_root: &Path, path: Option<&str>) -> Comman
     process
 }
 
+#[cfg(not(feature = "onprem"))]
 async fn hook_path() -> Option<String> {
     static HOOK_PATH: OnceLock<tokio::sync::watch::Receiver<Option<String>>> = OnceLock::new();
     let mut rx = HOOK_PATH
@@ -1157,6 +1211,7 @@ async fn hook_path() -> Option<String> {
     }
 }
 
+#[cfg(not(feature = "onprem"))]
 async fn resolve_hook_path() -> Option<String> {
     #[cfg(not(windows))]
     {
@@ -1174,6 +1229,7 @@ async fn resolve_hook_path() -> Option<String> {
     }
 }
 
+#[cfg(not(feature = "onprem"))]
 fn merge_paths(first: &str, second: &str) -> String {
     let mut seen = std::collections::HashSet::new();
     let mut merged = Vec::new();
@@ -1185,6 +1241,7 @@ fn merge_paths(first: &str, second: &str) -> String {
     merged.join(":")
 }
 
+#[cfg(not(feature = "onprem"))]
 fn expand_plugin_root(command: &str, plugin_root: &Path) -> String {
     command.replace("${PLUGIN_ROOT}", &plugin_root.to_string_lossy())
 }
@@ -1193,6 +1250,7 @@ fn expand_plugin_root(command: &str, plugin_root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::plugins::discovery::{DiscoveredPlugin, PluginScope};
+    use std::path::PathBuf;
 
     fn write_plugin(root: &Path, name: &str, hooks_json: &str) -> PathBuf {
         let plugin = root.join(name);
@@ -1400,7 +1458,7 @@ mod tests {
             assert!(!reason.contains(leaked));
         }
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[cfg(unix)]
     #[tokio::test]
     async fn subprocess_failures_fail_open_by_default_and_block_when_configured() {
@@ -1466,7 +1524,7 @@ mod tests {
             );
         }
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[cfg(unix)]
     #[tokio::test]
     async fn a_hook_that_never_received_the_payload_cannot_allow_but_can_still_deny() {
@@ -1510,7 +1568,7 @@ mod tests {
         assert!(matches!(denied.decision, HookDecision::Deny { .. }));
         assert_eq!(denied.cause, Some(HookOutcomeCause::PolicyDenial));
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn decisions_are_unchanged_by_on_failure_block() {
         let block = r#"printf '%s' '{"decision":"block","reason":"nope"}'"#;
@@ -1536,7 +1594,7 @@ mod tests {
             assert!(outcome.policy_evaluated);
         }
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn mixed_chains_preserve_evaluation_and_report_the_final_cause() {
         let failure = run_chain(
@@ -1953,6 +2011,7 @@ mod tests {
     /// A hook is an evaluation only if it exited 0 or returned a decision. A
     /// non-zero exit carrying no decision means the hook never answered, and an
     /// earlier hook that did answer keeps the aggregate true.
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn policy_evaluated_counts_clean_exits_and_decisions_only() {
         let plugin = |root: &Path, name: &str, command: &str| -> DiscoveredPlugin {
@@ -2024,6 +2083,7 @@ mod tests {
     /// PreToolUseResult honours its matcher against the tool name like every
     /// other tool-scoped event, so a subscriber can watch one tool rather than
     /// every call.
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn pre_tool_use_result_matcher_targets_the_tool_name() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2108,7 +2168,7 @@ mod tests {
         }]);
         assert!(!mgr.has_hooks(HookEvent::PostToolUse));
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn emit_runs_command_with_plugin_root_substitution() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2134,7 +2194,7 @@ mod tests {
         let written = std::fs::read_to_string(&marker).unwrap();
         assert_eq!(written.trim(), root.to_string_lossy());
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn stop_hook_emit_blocking_returns_denial() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2163,6 +2223,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "onprem"))]
     fn merge_paths_keeps_login_entries_first() {
         assert_eq!(
             merge_paths("/opt/homebrew/bin:/bin", "/bin:/usr/bin:/custom/bin"),
@@ -2171,6 +2232,7 @@ mod tests {
     }
 
     #[cfg(not(windows))]
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn command_hooks_repair_path_when_enabled() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2212,9 +2274,18 @@ mod tests {
             ),
         ]);
 
+        let rule = LoadedRule {
+            plugin_name: "test-plugin".into(),
+            #[cfg(not(feature = "onprem"))]
+            plugin_root: tmp.path().to_path_buf(),
+            matcher: None,
+            actions: Vec::new(),
+        };
         let run = run_command_hook(
+            HookEvent::SessionStart,
+            "test-session",
+            &rule,
             "hook-visible-tool",
-            tmp.path(),
             "{}",
             Duration::from_secs(5),
             true,
@@ -2229,7 +2300,7 @@ mod tests {
             "hook-visible-tool-ran"
         );
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn matcher_filters_by_tool_name() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2284,7 +2355,7 @@ mod tests {
     fn extract_banner_ignores_empty_banner() {
         assert_eq!(extract_banner(r#"{"banner":""}"#), None);
     }
-
+    #[cfg(not(feature = "onprem"))]
     #[tokio::test]
     async fn emit_collecting_banners_returns_banner_lines() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2326,5 +2397,66 @@ mod tests {
             .await;
 
         assert!(banners.is_empty());
+    }
+
+    #[cfg(feature = "onprem")]
+    #[tokio::test]
+    async fn command_hooks_suppressed_in_onprem_builds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("marker-must-not-exist");
+        let rule = LoadedRule {
+            plugin_name: "test-plugin".into(),
+            #[cfg(not(feature = "onprem"))]
+            plugin_root: tmp.path().to_path_buf(),
+            matcher: None,
+            actions: Vec::new(),
+        };
+        let err = run_command_hook(
+            HookEvent::SessionStart,
+            "test-session",
+            &rule,
+            &format!("touch {}", marker.display()),
+            "{}",
+            Duration::from_secs(5),
+            false,
+        )
+        .await
+        .expect_err("hook execution must be refused in on-prem builds");
+        assert!(
+            format!("{err:#}").contains("disabled in on-prem builds"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            !marker.exists(),
+            "hook command must not have run in on-prem builds"
+        );
+    }
+
+    #[cfg(feature = "onprem")]
+    #[tokio::test]
+    async fn emit_suppresses_hook_execution_in_onprem_builds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let marker = tmp.path().join("marker-must-not-exist");
+        let hooks = format!(
+            r#"{{"hooks":{{"SessionStart":[{{"hooks":[{{"type":"command","command":"touch {}"}}]}}]}}}}"#,
+            marker.display()
+        );
+        let root = write_plugin(tmp.path(), "p", &hooks);
+        let mgr = make_manager(vec![DiscoveredPlugin {
+            name: "p".into(),
+            root,
+            scope: PluginScope::User,
+        }]);
+
+        mgr.emit(
+            HookEvent::SessionStart,
+            HookContext::new(HookEvent::SessionStart, "s"),
+        )
+        .await;
+
+        assert!(
+            !marker.exists(),
+            "SessionStart hook must not have run in on-prem builds"
+        );
     }
 }

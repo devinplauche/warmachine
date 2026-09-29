@@ -135,6 +135,7 @@ pub(crate) async fn generate_session_name(
             provider,
             model_config,
             session_id,
+            "session_naming",
             &system,
             &[message],
             &[],

@@ -1,4 +1,7 @@
 //! OpenAI Live low-level API examples.
+//!
+//! Not built for on-prem: the `openai_live` module is compiled out there.
+#![cfg(not(feature = "onprem"))]
 
 use anyhow::Result;
 use goose_providers::openai_live::{OpenAiLiveClient, OpenAiLiveSessionConfig};

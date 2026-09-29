@@ -128,7 +128,9 @@ bundled-mcp = ["dep:goose-mcp", "goose-mcp/bundled-mcp"]
 scheduler = ["warmachine/scheduler"]
 platform-apps = ["warmachine/platform-apps"]
 chat-recall = ["warmachine/chat-recall"]
-onprem = ["warmachine/onprem"]
+# On-prem builds must never self-update from the public internet: imply
+# `disable-update` so `warmachine update` fails closed (see commands/update.rs).
+onprem = ["warmachine/onprem", "disable-update"]
 acp-http = ["warmachine/acp-http"]
 portable-default = [
     "rustls-tls",

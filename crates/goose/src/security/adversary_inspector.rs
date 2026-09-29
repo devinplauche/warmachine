@@ -331,6 +331,14 @@ impl AdversaryInspector {
         .await
         .map_err(|e| anyhow::anyhow!("Adversary LLM call failed: {}", e))?;
 
+        // On-prem audit: auxiliary model request, purpose label only (never content).
+        #[cfg(feature = "onprem")]
+        crate::onprem::audit_aux_model_request(
+            session_id,
+            &model_config.model_name,
+            "adversary_inspector",
+        );
+
         let output: String = response
             .content
             .iter()

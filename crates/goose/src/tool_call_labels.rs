@@ -198,6 +198,7 @@ async fn complete_label(
             provider,
             model_config,
             session_id,
+            "tool_label",
             system_prompt,
             from_ref(message),
             &[],

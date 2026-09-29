@@ -176,6 +176,16 @@ pub async fn detect_read_only_requests(
     )
     .await;
 
+    // On-prem audit: auxiliary model request, purpose label only (never content).
+    #[cfg(feature = "onprem")]
+    if res.is_ok() {
+        crate::onprem::audit_aux_model_request(
+            session_id,
+            &model_config.model_name,
+            "permission_judge",
+        );
+    }
+
     // Process the response and return an empty vector if the response is invalid
     if let Ok((message, _usage)) = res {
         extract_read_only_request_ids(&message).unwrap_or_default()

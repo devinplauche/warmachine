@@ -36,6 +36,9 @@ pub struct ApiClient {
 
 #[derive(Clone)]
 enum TransportPolicy {
+    // Never constructed under `onprem` (the constructor pins SameOrigin);
+    // keep the variant for the default build without tripping -D warnings.
+    #[cfg_attr(feature = "onprem", allow(dead_code))]
     Default,
     HttpsOnly,
     LoopbackHttp,
@@ -281,7 +284,28 @@ impl ApiClient {
         #[cfg(feature = "onprem")]
         crate::onprem::check_url_allowed(&host)?;
 
+        // On-prem builds pin redirect-following to the origin the client was
+        // constructed for: every request URL is same-origin by construction
+        // (see `build_url`) and re-checked against the compile-time allowlist,
+        // so a cross-origin redirect here can only be an exfiltration attempt
+        // and must fail closed rather than carry the Authorization header off
+        // the allowlist.
+        #[cfg(feature = "onprem")]
+        let transport_policy = {
+            let origin = url::Url::parse(&host)
+                .map_err(|error| anyhow::anyhow!("Invalid base URL: {error}"))?
+                .origin();
+            TransportPolicy::SameOrigin(origin)
+        };
+        #[cfg(not(feature = "onprem"))]
+        let transport_policy = TransportPolicy::Default;
+
         let mut client_builder = Self::client_builder(timeout);
+        // Apply the transport policy to the initial client too, not just on
+        // `rebuild_client`: this is the only constructor, so the policy is
+        // effective from the first request. (`Default` is a no-op here, so
+        // non-on-prem builds are unaffected.)
+        client_builder = Self::configure_transport(client_builder, &transport_policy);
 
         if let Some(ref config) = tls_config {
             client_builder = Self::configure_tls(client_builder, config)?;
@@ -298,7 +322,7 @@ impl ApiClient {
             timeout,
             tls_config,
             request_builder: None,
-            transport_policy: TransportPolicy::Default,
+            transport_policy,
         })
     }
 
@@ -517,6 +541,17 @@ impl ApiClient {
         for (key, value) in &self.default_query {
             url.query_pairs_mut().append_pair(key, value);
         }
+
+        // On-prem builds re-check the fully assembled request URL against the
+        // compile-time allowlist on every request. `Url::join` silently
+        // replaces the host when `path` is an absolute URL (WHATWG semantics),
+        // so the construction-time host check alone would let a runtime
+        // base-path override (e.g. `OPENAI_BASE_PATH=https://evil.example/…`)
+        // redirect requests — and the bearer token, attached after URL
+        // construction in `send_request` — off the allowlist. Fail closed
+        // here, for every provider that funnels through `ApiClient`.
+        #[cfg(feature = "onprem")]
+        crate::onprem::check_url_allowed(url.as_str())?;
 
         Ok(url)
     }
@@ -1093,5 +1128,46 @@ mod tests {
                 .and_then(|value| value.to_str().ok());
             assert_eq!(actual, Some("test-session_id-456"));
         });
+    }
+}
+
+#[cfg(all(test, feature = "onprem"))]
+mod onprem_build_url_tests {
+    use super::*;
+
+    fn onprem_client() -> ApiClient {
+        ApiClient::new_with_tls(
+            crate::onprem::primary_base_url().to_string(),
+            AuthMethod::NoAuth,
+            None,
+        )
+        .expect("primary base URL must be allowlisted")
+    }
+
+    #[test]
+    fn relative_path_stays_on_allowlisted_host() {
+        let client = onprem_client();
+        let url = client
+            .build_url("v1/chat/completions")
+            .expect("relative path must build under onprem");
+        assert!(
+            crate::onprem::check_url_allowed(url.as_str()).is_ok(),
+            "joined URL must remain allowlisted: {url}"
+        );
+    }
+
+    #[test]
+    fn absolute_url_base_path_fails_closed() {
+        // Regression test: `OPENAI_BASE_PATH=https://evil.example.com/x` used
+        // to silently replace the request host via `Url::join` (WHATWG
+        // semantics), sending requests and the bearer token off the allowlist.
+        let client = onprem_client();
+        let err = client
+            .build_url("https://evil.example.com/x")
+            .expect_err("absolute-URL path must fail closed under onprem");
+        assert!(
+            err.to_string().contains("not on the on-prem allowlist"),
+            "unexpected error: {err:#}"
+        );
     }
 }

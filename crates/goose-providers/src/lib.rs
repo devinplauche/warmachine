@@ -20,7 +20,7 @@ pub mod browser_live_transport;
 pub mod declarative;
 pub mod http_status;
 pub mod live;
-#[cfg(feature = "live-websocket")]
+#[cfg(all(feature = "live-websocket", not(feature = "onprem")))]
 pub mod live_transport_websocket;
 pub mod live_voice_provider;
 #[cfg(feature = "local-inference")]
@@ -30,8 +30,11 @@ pub mod ollama;
 pub mod onprem;
 pub mod openai;
 pub mod openai_compatible;
+// The OpenAI Live protocol module dials api.openai.com; it is compiled out
+// of on-prem builds, which may only contact the baked-in allowlist.
+#[cfg(not(feature = "onprem"))]
 pub mod openai_live;
-#[cfg(feature = "live-websocket")]
+#[cfg(all(feature = "live-websocket", not(feature = "onprem")))]
 pub mod openai_live_voice_provider;
 pub mod openrouter;
 pub mod openrouter_format;

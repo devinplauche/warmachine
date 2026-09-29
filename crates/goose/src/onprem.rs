@@ -584,6 +584,18 @@ pub fn audit_model_request(
     })
 }
 
+/// Best-effort audit hook for auxiliary (non-agent-loop) model requests.
+///
+/// `purpose` is a short label naming the auxiliary task ("summarize",
+/// "permission_judge", ...) — never request content. A logging failure is
+/// warned and never propagated: the request must not fail because the audit
+/// write failed.
+pub fn audit_aux_model_request(session_id: &str, model: &str, purpose: &str) {
+    if let Err(e) = audit_model_request(session_id, model, primary_base_url(), purpose) {
+        tracing::warn!("on-prem audit log write failed: {e:#}");
+    }
+}
+
 /// Append a generalized audit event: session lifecycle (`session_start`,
 /// `session_end`), extension changes (`extension_added`), and future event
 /// types. `details` carries small non-sensitive metadata; the hash chain
@@ -962,33 +974,14 @@ fn write_forward_cursor(entry_hash: &str) -> Result<()> {
     Ok(())
 }
 
-/// Collect `(entry_hash, line)` pairs for entries appended after the cursor.
-///
-/// On first run (no cursor), all entries are collected: the sink receives the
-/// full history. When the cursor fails integrity verification, it is not
-/// trusted — see [`read_forward_cursor`]: the tamper is alerted and this pass
-/// re-anchors at the pre-tamper tail so the alert itself is forwarded. When
-/// the cursor's hash is simply no longer in the log (log truncated or
-/// rotated between passes), forwarding anchors at the current end of the log:
-/// the local file remains the complete record, and backfilling history after
-/// an anomaly is a manual operator task (`verify_audit_log` + any NDJSON
-/// shipper). Rotated archives are verified locally but never forwarded: the
-/// SIEM's copy of pre-rotation history depends on the forwarder having kept
-/// up before the rotation.
-fn unforwarded_entries() -> Result<Vec<(String, String)>> {
-    let path = audit_log_path()?;
-    let file = match std::fs::File::open(&path) {
+/// Read `(entry_hash, line)` pairs from one audit log file, skipping blank
+/// and unparseable lines. A missing file reads as empty.
+fn read_audit_log_entries(path: &Path) -> Vec<(String, String)> {
+    let file = match std::fs::File::open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => {
-            return Err(e).with_context(|| format!("cannot open audit log {}", path.display()))?
-        }
+        Err(_) => return Vec::new(),
     };
-
-    let cursor = read_forward_cursor();
     let mut entries = Vec::new();
-    let mut found_cursor = cursor.is_none();
-    let mut last_hash: Option<String> = None;
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() {
             continue;
@@ -1003,24 +996,63 @@ fn unforwarded_entries() -> Result<Vec<(String, String)>> {
         let Some(entry_hash) = entry_hash else {
             continue;
         };
-        last_hash = Some(entry_hash.clone());
-        if !found_cursor {
-            if Some(entry_hash.as_str()) == cursor.as_deref() {
-                found_cursor = true;
-            }
-            continue;
-        }
         entries.push((entry_hash, line));
     }
-    if !found_cursor {
-        // Stale cursor (log truncated/rotated, or first run after the cursor
-        // file was deleted): anchor at the current end of the log so the next
-        // run picks up new entries. History stays in the local file.
-        if let Some(last) = last_hash {
-            write_forward_cursor(&last)?;
+    entries
+}
+
+/// Collect `(entry_hash, line)` pairs for entries appended after the cursor,
+/// in chronological order across rotated archives and the live log.
+///
+/// On first run (no cursor), everything is collected — archives oldest-first,
+/// then the live log — so the sink receives the full history. When the cursor
+/// fails integrity verification, it is not trusted — see
+/// [`read_forward_cursor`]: the tamper is alerted and this pass re-anchors at
+/// the pre-tamper tail so the alert itself is forwarded. When the cursor's
+/// hash is no longer in any log file (log truncated between passes, or the
+/// cursor file was deleted), forwarding re-anchors at the current end of the
+/// live log: the local files remain the complete record, and backfilling
+/// history after an anomaly is a manual operator task (`verify_audit_log` +
+/// any NDJSON shipper). A cursor stranded in a rotated archive by a rotation
+/// between passes is located there and the replay continues through newer
+/// archives into the live file, so entries are no longer skipped after
+/// rotation. A rotation landing mid-pass can only duplicate entries, which is
+/// safe: the cursor is content-addressed by entry hash.
+fn unforwarded_entries() -> Result<Vec<(String, String)>> {
+    let path = audit_log_path()?;
+    // Oldest archive first, live log last: chronological order.
+    let mut files = rotated_audit_logs(&path)?;
+    files.push(path.clone());
+
+    let Some(cursor) = read_forward_cursor() else {
+        return Ok(files
+            .iter()
+            .flat_map(|p| read_audit_log_entries(p))
+            .collect());
+    };
+
+    // Locate the cursor newest-first; the common case (live log) is found first.
+    for (newest_idx, file) in files.iter().rev().enumerate() {
+        let entries = read_audit_log_entries(file);
+        if let Some(pos) = entries.iter().position(|(hash, _)| hash == &cursor) {
+            let file_idx = files.len() - 1 - newest_idx;
+            let mut unforwarded: Vec<(String, String)> =
+                entries.into_iter().skip(pos + 1).collect();
+            for newer in &files[file_idx + 1..] {
+                unforwarded.extend(read_audit_log_entries(newer));
+            }
+            return Ok(unforwarded);
         }
     }
-    Ok(entries)
+
+    // Stale cursor (log truncated between passes, or cursor file deleted):
+    // anchor at the current end of the live log so the next run picks up new
+    // entries. History stays in the local files; this avoids re-forwarding
+    // ancient history on a fresh cursor.
+    if let Some((last, _)) = read_audit_log_entries(&path).last() {
+        write_forward_cursor(last)?;
+    }
+    Ok(Vec::new())
 }
 
 /// POST one batch of NDJSON audit entries to the sink.

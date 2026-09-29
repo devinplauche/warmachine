@@ -70,9 +70,12 @@ pub async fn from_env(
     //
     // OPENAI_BASE_PATH always wins when set explicitly.
     //
-    // On-prem builds ignore every runtime endpoint override and use the
-    // compile-time endpoint instead; the lockdown cannot be disabled without
-    // rebuilding.
+    // On-prem builds pin the host to the compile-time endpoint; runtime
+    // path inputs such as OPENAI_BASE_PATH are still read, but every request
+    // URL is validated against the compile-time allowlist in
+    // `ApiClient::build_url` before it is sent, so an absolute-URL or
+    // off-host override fails closed. The lockdown cannot be disabled
+    // without rebuilding.
     #[cfg(feature = "onprem")]
     let parsed = parse_base_url(crate::onprem::primary_base_url())?;
     #[cfg(not(feature = "onprem"))]

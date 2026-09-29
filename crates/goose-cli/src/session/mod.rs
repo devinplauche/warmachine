@@ -50,12 +50,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
+#[cfg(not(feature = "onprem"))]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
+#[cfg(not(feature = "onprem"))]
 use warmachine::config::paths::Paths;
 use warmachine::config::providers;
 use warmachine::conversation::message::{
@@ -186,18 +188,36 @@ enum NotificationData {
 }
 
 struct HistoryManager {
+    // On-prem builds never persist prompt history to disk (see `load`/`save`
+    // below), so there is no history file to track.
+    #[cfg(not(feature = "onprem"))]
     history_file: PathBuf,
+    #[cfg(not(feature = "onprem"))]
     old_history_file: PathBuf,
 }
 
 impl HistoryManager {
     fn new() -> Self {
         Self {
+            #[cfg(not(feature = "onprem"))]
             history_file: Paths::state_dir().join("history.txt"),
+            #[cfg(not(feature = "onprem"))]
             old_history_file: Paths::config_dir().join("history.txt"),
         }
     }
 
+    // On-prem builds keep prompt history in memory only: prompts can carry
+    // CUI, so never writing history.txt is the fail-closed posture.
+    // rustyline's DefaultHistory already buffers entries in memory, so
+    // in-session recall keeps working with nothing touching disk.
+    #[cfg(feature = "onprem")]
+    fn load(
+        &self,
+        _editor: &mut rustyline::Editor<GooseCompleter, rustyline::history::DefaultHistory>,
+    ) {
+    }
+
+    #[cfg(not(feature = "onprem"))]
     fn load(
         &self,
         editor: &mut rustyline::Editor<GooseCompleter, rustyline::history::DefaultHistory>,
@@ -218,6 +238,14 @@ impl HistoryManager {
         }
     }
 
+    #[cfg(feature = "onprem")]
+    fn save(
+        &self,
+        _editor: &mut rustyline::Editor<GooseCompleter, rustyline::history::DefaultHistory>,
+    ) {
+    }
+
+    #[cfg(not(feature = "onprem"))]
     fn save(
         &self,
         editor: &mut rustyline::Editor<GooseCompleter, rustyline::history::DefaultHistory>,
@@ -1368,10 +1396,29 @@ impl CliSession {
                                     if goose_mode == GooseMode::Approve || goose_mode == GooseMode::SmartApprove {
                                         cancel_token_clone.cancel();
                                         drop(stream);
+                                        let headless_advice = if cfg!(feature = "onprem") {
+                                            "Run interactively, or set WARMACHINE_MODE=chat for a tool-free headless session."
+                                        } else {
+                                            "Use GooseMode::Auto for headless sessions."
+                                        };
                                         return Err(anyhow::anyhow!(
                                             "Tool approval required in non-interactive mode with GooseMode::{goose_mode}. \
                                              This is an invalid configuration — Approve/SmartApprove modes require an \
-                                             interactive terminal. Use GooseMode::Auto for headless sessions."
+                                             interactive terminal. {headless_advice}"
+                                        ));
+                                    }
+                                    // On-prem builds fail closed here too: Auto is the
+                                    // default mode and would silently grant every tool
+                                    // call in a headless session. Never auto-allow.
+                                    #[cfg(feature = "onprem")]
+                                    if goose_mode == GooseMode::Auto {
+                                        cancel_token_clone.cancel();
+                                        drop(stream);
+                                        return Err(anyhow::anyhow!(
+                                            "Tool approval required in non-interactive mode with GooseMode::Auto. \
+                                             On-prem builds never auto-approve tool calls in headless sessions: \
+                                             select an explicit approval mode (run interactively, or set \
+                                             WARMACHINE_MODE=chat for a tool-free session)."
                                         ));
                                     }
                                     tracing::warn!(

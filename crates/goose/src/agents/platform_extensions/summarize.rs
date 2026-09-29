@@ -205,6 +205,10 @@ async fn execute_summarize(
     .await
     .map_err(|e| format!("LLM call failed: {}", e))?;
 
+    // On-prem audit: auxiliary model request, purpose label only (never content).
+    #[cfg(feature = "onprem")]
+    crate::onprem::audit_aux_model_request(session_id, &model_config.model_name, "summarize");
+
     let response_text = response
         .content
         .iter()

@@ -1886,6 +1886,16 @@ mod tests {
 }
 
 async fn hf_client() -> Result<HFClient> {
+    // On-prem builds may only contact the compile-time allowlist; Hugging
+    // Face is never on it, so every search/resolve/download through this
+    // client fails closed here instead of dialing huggingface.co.
+    #[cfg(feature = "onprem")]
+    {
+        bail!(
+            "Hugging Face model downloads are disabled in this on-prem build; \
+             use a pre-seeded local model cache instead"
+        );
+    }
     let mut builder = HFClient::builder().user_agent("goose-ai-agent");
     if let Some(token) = optional_hf_token(huggingface_auth::resolve_token_async()).await {
         builder = builder.token(token);

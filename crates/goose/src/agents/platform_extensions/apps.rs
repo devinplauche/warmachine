@@ -43,6 +43,10 @@ async fn complete_app_content(
     .await
     .map_err(|e| format!("LLM call failed: {e}"))?;
 
+    // On-prem audit: auxiliary model request, purpose label only (never content).
+    #[cfg(feature = "onprem")]
+    crate::onprem::audit_aux_model_request(session_id, &model_config.model_name, "app_content");
+
     let response = if model_config.toolshim {
         toolshim_postprocess(response, &toolshim_tools)
             .await

@@ -7,7 +7,7 @@ use crate::session::SessionManager;
 use crate::token_counter::TokenCounter;
 use goose_providers::live_voice_provider::{LiveVoiceInputMessage, LiveVoiceProvider};
 pub(crate) use goose_providers::live_voice_provider::{WebRtcAnswer, WebRtcOffer};
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 use goose_providers::openai_live_voice_provider::OpenAiLiveVoiceProvider;
 use std::{
     collections::HashMap,
@@ -18,13 +18,13 @@ use tokio_util::sync::CancellationToken;
 
 const LIVE_VOICE_INPUT_MESSAGE_LIMIT: usize = 128;
 const LIVE_VOICE_INPUT_TOKEN_LIMIT: usize = 8_192;
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 const LIVE_VOICE_ENABLED_CONFIG_KEY: &str = "WARMACHINE_LIVE_VOICE_ENABLED";
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 const LIVE_VOICE_CONFIG_KEY: &str = "WARMACHINE_LIVE_VOICE";
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 const DEFAULT_OPENAI_LIVE_VOICE: &str = "marin";
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 const LIVE_SESSION_INSTRUCTIONS: &str = concat!(
     "You are WarMachine's live voice interface. Keep the conversation natural and concise.\n",
     "Interruption policy: Stop speaking when the user interrupts and listen to what they say.\n",
@@ -42,7 +42,7 @@ const LIVE_SESSION_INSTRUCTIONS: &str = concat!(
     "while WarMachine works. Do not guess the result. Present delegated results directly. Only say ",
     "the task stopped or finished after WarMachine confirms it."
 );
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 const DELEGATION_DELIVERY_FAILURE_INSTRUCTIONS: &str = concat!(
     "The latest update for the delegated request could not be delivered. Tell the user you ",
     "couldn't bring the update into this voice conversation and ask them to try again. Do not ",
@@ -342,7 +342,7 @@ impl LiveVoiceService {
     }
 }
 
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 fn configured_live_voice_enabled() -> bool {
     crate::config::Config::global()
         .get_param::<serde_json::Value>(LIVE_VOICE_ENABLED_CONFIG_KEY)
@@ -356,7 +356,7 @@ fn configured_live_voice_enabled() -> bool {
         })
 }
 
-#[cfg(feature = "live-voice")]
+#[cfg(all(feature = "live-voice", not(feature = "onprem")))]
 fn configured_live_voice() -> Result<Arc<dyn LiveVoiceProvider>, &'static str> {
     if !configured_live_voice_enabled() {
         return Err("Live voice is disabled");
@@ -379,7 +379,10 @@ fn configured_live_voice() -> Result<Arc<dyn LiveVoiceProvider>, &'static str> {
     .map_err(|_| "Live voice provider is not configured")
 }
 
-#[cfg(not(feature = "live-voice"))]
+// Fail-closed fallback: live voice is unavailable both when the feature is
+// off and in on-prem builds (the OpenAI live-voice provider above is
+// compiled out there, since it dials api.openai.com).
+#[cfg(not(all(feature = "live-voice", not(feature = "onprem"))))]
 fn configured_live_voice() -> Result<Arc<dyn LiveVoiceProvider>, &'static str> {
     Err("Live voice is disabled")
 }

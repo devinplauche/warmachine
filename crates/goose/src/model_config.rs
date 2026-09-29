@@ -90,21 +90,35 @@ fn one_shot_model_config(model_config: ModelConfig) -> ModelConfig {
 /// Run a completion for a one-shot auxiliary task on the main session model.
 /// Thinking is disabled and prompt-cache writes are skipped because this prompt
 /// will not recur.
+///
+/// `purpose` is a short label naming the auxiliary task ("tool_label",
+/// "summarize", ...) for the on-prem audit trail — never request content.
 pub async fn complete_one_shot(
     provider: &dyn Provider,
     model_config: &ModelConfig,
     session_id: &str,
+    #[cfg_attr(not(feature = "onprem"), allow(unused_variables))] purpose: &str,
     system: &str,
     messages: &[Message],
     tools: &[Tool],
 ) -> Result<(Message, ProviderUsage), ProviderError> {
     let one_shot_model_config = one_shot_model_config(model_config.clone());
 
-    crate::session_context::with_session_id(
+    let result = crate::session_context::with_session_id(
         Some(session_id.to_string()),
         provider.complete(&one_shot_model_config, system, messages, tools),
     )
-    .await
+    .await;
+
+    // On-prem builds keep a tamper-evident audit log of every model request
+    // (CUI/ITAR audit trail); the payload is a purpose label only, never
+    // request content. Best-effort: a logging failure must not break the request.
+    #[cfg(feature = "onprem")]
+    if result.is_ok() {
+        crate::onprem::audit_aux_model_request(session_id, &model_config.model_name, purpose);
+    }
+
+    result
 }
 
 fn apply_openai_request_params(mut model: ModelConfig) -> ModelConfig {

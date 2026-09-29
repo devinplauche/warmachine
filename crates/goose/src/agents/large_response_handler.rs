@@ -1,5 +1,8 @@
 use crate::config::Config;
-use rmcp::model::{CallToolResult, ContentBlock, ErrorData};
+#[cfg(not(feature = "onprem"))]
+use rmcp::model::ContentBlock;
+use rmcp::model::{CallToolResult, ErrorData};
+#[cfg(not(feature = "onprem"))]
 use std::io::Write;
 
 const DEFAULT_LARGE_TEXT_THRESHOLD: usize = 200_000;
@@ -14,57 +17,89 @@ pub(crate) fn max_tool_response_size() -> usize {
 pub fn process_tool_response(
     response: Result<CallToolResult, ErrorData>,
 ) -> Result<CallToolResult, ErrorData> {
-    let threshold = max_tool_response_size();
-    match response {
-        Ok(mut result) => {
-            let mut processed_contents = Vec::new();
+    // On-prem builds never spill tool output to disk: responses can carry CUI,
+    // and plaintext in the system temp dir is the finding. The content is
+    // returned to the caller inline instead, so no spill file outlives this
+    // call; a best-effort once-per-process sweep removes stale spill files
+    // left behind by non-onprem builds.
+    #[cfg(feature = "onprem")]
+    {
+        cleanup_stale_spill_files();
+        response
+    }
+    #[cfg(not(feature = "onprem"))]
+    {
+        let threshold = max_tool_response_size();
+        match response {
+            Ok(mut result) => {
+                let mut processed_contents = Vec::new();
 
-            for content in result.content {
-                match content.as_text() {
-                    Some(text_content) => {
-                        // Check if text exceeds threshold
-                        if text_content.text.chars().count() > threshold {
-                            // Write to temp file
-                            match write_large_text_to_file(&text_content.text) {
-                                Ok(file_path) => {
-                                    // Create a new text content with reference to the file
-                                    let message = format!(
-                                        "The response returned from the tool call was larger ({} characters) and is stored in the file which you can use other tools to examine or search in: {}",
-                                        text_content.text.chars().count(),
-                                        file_path
-                                    );
-                                    processed_contents.push(ContentBlock::text(message));
+                for content in result.content {
+                    match content.as_text() {
+                        Some(text_content) => {
+                            // Check if text exceeds threshold
+                            if text_content.text.chars().count() > threshold {
+                                // Write to temp file
+                                match write_large_text_to_file(&text_content.text) {
+                                    Ok(file_path) => {
+                                        // Create a new text content with reference to the file
+                                        let message = format!(
+                                            "The response returned from the tool call was larger ({} characters) and is stored in the file which you can use other tools to examine or search in: {}",
+                                            text_content.text.chars().count(),
+                                            file_path
+                                        );
+                                        processed_contents.push(ContentBlock::text(message));
+                                    }
+                                    Err(e) => {
+                                        // If file writing fails, include original content with warning
+                                        let warning = format!(
+                                            "Warning: Failed to write large response to file: {}. Showing full content instead.\n\n{}",
+                                            e,
+                                            text_content.text
+                                        );
+                                        processed_contents.push(ContentBlock::text(warning));
+                                    }
                                 }
-                                Err(e) => {
-                                    // If file writing fails, include original content with warning
-                                    let warning = format!(
-                                        "Warning: Failed to write large response to file: {}. Showing full content instead.\n\n{}",
-                                        e,
-                                        text_content.text
-                                    );
-                                    processed_contents.push(ContentBlock::text(warning));
-                                }
+                            } else {
+                                // Keep original content for smaller texts
+                                processed_contents.push(content);
                             }
-                        } else {
-                            // Keep original content for smaller texts
+                        }
+                        None => {
+                            // Pass through other content types unchanged
                             processed_contents.push(content);
                         }
                     }
-                    None => {
-                        // Pass through other content types unchanged
-                        processed_contents.push(content);
-                    }
                 }
-            }
 
-            result.content = processed_contents;
-            Ok(result)
+                result.content = processed_contents;
+                Ok(result)
+            }
+            Err(e) => Err(e),
         }
-        Err(e) => Err(e),
     }
 }
 
+/// Best-effort removal of stale `goose_mcp_response_*.txt` spill files from
+/// the system temp dir (e.g. left behind by non-onprem builds or crashes).
+/// Runs once per process; every error is ignored.
+#[cfg(feature = "onprem")]
+fn cleanup_stale_spill_files() {
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    SWEPT.call_once(|| {
+        if let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if name.starts_with("goose_mcp_response_") && name.ends_with(".txt") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    });
+}
+
 /// Write large text content to a temporary file
+#[cfg(not(feature = "onprem"))]
 fn write_large_text_to_file(content: &str) -> Result<String, std::io::Error> {
     let mut file = tempfile::Builder::new()
         .prefix("goose_mcp_response_")
@@ -81,7 +116,9 @@ mod tests {
     use super::*;
     use rmcp::model::{ContentBlock, ErrorCode, ErrorData};
     use std::borrow::Cow;
+    #[cfg(not(feature = "onprem"))]
     use std::fs;
+    #[cfg(not(feature = "onprem"))]
     use std::path::Path;
 
     #[test]
@@ -104,6 +141,30 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "onprem")]
+    #[test]
+    fn test_large_text_response_not_spilled_onprem() {
+        // On-prem builds never write tool output to disk: oversized content is
+        // returned to the caller inline instead of via a spill file.
+        let large_text = "a".repeat(DEFAULT_LARGE_TEXT_THRESHOLD + 1000);
+        let content = ContentBlock::text(large_text.clone());
+
+        let response = Ok(CallToolResult::success(vec![content]));
+
+        // Process the response
+        let processed = process_tool_response(response).unwrap();
+
+        // Verify the full content is returned inline with no spill message
+        assert_eq!(processed.content.len(), 1);
+        if let Some(text_content) = processed.content[0].as_text() {
+            assert_eq!(text_content.text, large_text);
+            assert!(!text_content.text.contains("stored in the file"));
+        } else {
+            panic!("Expected text content");
+        }
+    }
+
+    #[cfg(not(feature = "onprem"))]
     #[test]
     fn test_large_text_response_redirected_to_file() {
         // Create a text larger than the threshold
@@ -154,10 +215,11 @@ mod tests {
             assert_eq!(img.data, "base64data");
             assert_eq!(img.mime_type, "image/png");
         } else {
-            panic!("Expected image content");
+            panic!("Expected text content");
         }
     }
 
+    #[cfg(not(feature = "onprem"))]
     #[test]
     fn test_mixed_content_handled_correctly() {
         // Create a response with mixed content types
@@ -202,7 +264,7 @@ mod tests {
             assert_eq!(img.data, "image_data");
             assert_eq!(img.mime_type, "image/jpeg");
         } else {
-            panic!("Expected image content");
+            panic!("Expected text content");
         }
     }
 
@@ -230,6 +292,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(feature = "onprem"))]
     #[test]
     fn test_large_response_files_have_unique_paths() {
         let first_path = write_large_text_to_file("first response").unwrap();
@@ -249,6 +312,7 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg(not(feature = "onprem"))]
     #[test]
     fn test_large_response_file_is_owner_only() {
         use std::os::unix::fs::PermissionsExt;
