@@ -2,7 +2,7 @@
 // so the implementation below (and most of this module) is cfg-disabled and
 // would otherwise trigger dead_code/unused warnings that fail clippy.
 #![cfg_attr(
-    target_arch = "riscv64",
+    any(target_arch = "riscv64", feature = "disable-update"),
     allow(dead_code, unused_imports, unused_variables)
 )]
 

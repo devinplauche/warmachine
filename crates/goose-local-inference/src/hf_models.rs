@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[cfg(not(feature = "onprem"))]
 use crate::huggingface_auth;
 use crate::mlx::snapshot_files_are_complete as mlx_snapshot_files_are_complete;
 
@@ -453,6 +454,7 @@ fn build_download_url(repo_id: &str, filename: &str) -> String {
     format!("{}/{}/resolve/main/{}", HF_DOWNLOAD_BASE, repo_id, filename)
 }
 
+#[cfg(not(feature = "onprem"))]
 async fn optional_hf_token(
     token: impl std::future::Future<Output = Result<Option<String>>>,
 ) -> Option<String> {
@@ -1896,11 +1898,14 @@ async fn hf_client() -> Result<HFClient> {
              use a pre-seeded local model cache instead"
         );
     }
-    let mut builder = HFClient::builder().user_agent("goose-ai-agent");
-    if let Some(token) = optional_hf_token(huggingface_auth::resolve_token_async()).await {
-        builder = builder.token(token);
+    #[cfg(not(feature = "onprem"))]
+    {
+        let mut builder = HFClient::builder().user_agent("goose-ai-agent");
+        if let Some(token) = optional_hf_token(huggingface_auth::resolve_token_async()).await {
+            builder = builder.token(token);
+        }
+        builder.build().map_err(Into::into)
     }
-    builder.build().map_err(Into::into)
 }
 
 fn model_repo(client: &HFClient, repo_id: &str) -> Result<HFRepository<RepoTypeModel>> {

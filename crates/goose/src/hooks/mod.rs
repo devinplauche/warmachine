@@ -1300,6 +1300,7 @@ mod tests {
             .await
     }
 
+    #[cfg(not(feature = "onprem"))]
     fn oversized_context(event: HookEvent) -> HookContext {
         let filler = "x".repeat(1024 * 1024);
         HookContext::new(event, "s").with_tool(
