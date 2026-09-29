@@ -5,7 +5,7 @@
 mod common_tests;
 use common_tests::fixtures::provider::AcpProviderConnection;
 use common_tests::fixtures::run_test;
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use common_tests::run_prompt_codemode;
 use common_tests::{
     run_close_session, run_config_mcp, run_delete_session, run_fs_read_text_file_true,
@@ -89,7 +89,7 @@ fn test_prompt_basic() {
 }
 
 #[test]
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 fn test_prompt_codemode() {
     run_test(async { run_prompt_codemode::<AcpProviderConnection>().await });
 }

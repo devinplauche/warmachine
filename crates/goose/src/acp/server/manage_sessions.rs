@@ -119,7 +119,32 @@ impl GooseAcpAgent {
         req: ExportSessionRequest,
     ) -> Result<ExportSessionResponse, agent_client_protocol::Error> {
         let data = match req.format {
-            SessionExportFormat::Json => self.session_manager.export_session(&req.session_id).await,
+            SessionExportFormat::Json => {
+                // Security event: full session content leaving the store.
+                // The Markdown branch is audited inside export_session_to_markdown;
+                // this branch needs its own event. Message count only, never content.
+                #[cfg(feature = "onprem")]
+                {
+                    let message_count = self
+                        .session_manager
+                        .get_session(&req.session_id, false)
+                        .await
+                        .map(|s| {
+                            s.conversation
+                                .map(|c| c.user_visible_messages().len())
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default();
+                    if let Err(e) = crate::onprem::audit_event(
+                        "session_export",
+                        None,
+                        &serde_json::json!({"messages": message_count}),
+                    ) {
+                        tracing::warn!("audit log write failed: {e:#}");
+                    }
+                }
+                self.session_manager.export_session(&req.session_id).await
+            }
             SessionExportFormat::Markdown => {
                 self.session_manager
                     .export_session_markdown(&req.session_id)

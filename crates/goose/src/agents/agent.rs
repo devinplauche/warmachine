@@ -1749,7 +1749,7 @@ impl Agent {
         ];
         operations.extend(remaining_operations);
         let request_preparer = GooseInferenceRequestPreparer {
-            #[cfg(feature = "code-mode")]
+            #[cfg(all(feature = "code-mode", not(feature = "onprem")))]
             extension_manager: self.extension_manager.clone(),
             goose_mode: &self.current_goose_mode,
             prompt_manager: &self.prompt_manager,

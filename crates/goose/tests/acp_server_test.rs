@@ -16,7 +16,7 @@ use common_tests::fixtures::{
     run_test, spawn_acp_server_in_process, Connection, OpenAiFixture, PermissionDecision, Session,
     SessionData, TestConnectionConfig,
 };
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use common_tests::run_prompt_codemode;
 use common_tests::{
     run_close_session, run_config_mcp, run_config_option_mode_set, run_config_option_model_set,
@@ -1190,7 +1190,7 @@ fn test_prompt_basic() {
 }
 
 #[test]
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 fn test_prompt_codemode() {
     run_test(async { run_prompt_codemode::<AcpServerConnection>().await });
 }

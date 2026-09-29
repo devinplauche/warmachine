@@ -92,12 +92,13 @@ Two entry shapes, both hash-chained:
 
 - **Events**: `ts`, `event` (`session_start`, `session_end`,
   `extension_added`, `extension_removed`, `session_export`, `tool_call`,
-  `permission_grant`, `recipe_execute`,
+  `permission_grant`, `recipe_execute`, `credential_set`, `credential_removed`,
   `keychain_failure`, `audit_verified`, `audit_cursor_tamper`,
   `sessions_purged`), `session_id`, `details` (small metadata — tool name
   and allow/deny decision for `tool_call`, tool name and grant type for
-  `permission_grant`, recipe title and source for `recipe_execute`; never
-  tool arguments, results, or recipe parameters),
+  `permission_grant`, recipe title and source for `recipe_execute`, secret
+  key name for `credential_set` / `credential_removed`; never
+  tool arguments, results, recipe parameters, or secret values),
   `prev_hash`, `entry_hash`, where
 
   ```
@@ -163,8 +164,9 @@ message payloads are **encrypted at rest** in the on-prem build:
   parameters** (`user_recipe_values_json`), **recipe definitions**
   (`sessions.recipe_json`), and **extension configuration**
   (`sessions.extension_data` — MCP server env vars and HTTP headers, which
-  carry API keys and bearer tokens) are sealed too — all five can carry
-  CUI or credentials and all five used to rest in plaintext.
+  carry API keys and bearer tokens), and **model configuration**
+  (`sessions.model_config_json` — provider request params are an open-ended
+  map) are sealed too — all six can carry CUI or credentials and all six used to rest in plaintext.
 - Because payloads are sealed, keyword search (`session list --match`,
   chat-recall) decrypts candidates in memory and matches in Rust instead of
   in SQL. Results are identical; large histories are somewhat slower.
@@ -204,6 +206,16 @@ the `!` bang-shell path) are refused at compile time. Rationale: arbitrary
 shell commands can open network connections outside the build's allowlist,
 and command-text filtering is bypassable, so the capability is removed
 rather than sandbox-gated. Run commands in your own terminal.
+
+The **Code Mode** platform extension (`code_execution`, with the
+`execute_bash` / `execute_typescript` tools) is compiled out of on-prem
+builds entirely, for the same reason: it runs arbitrary commands with the
+user's full network access and no egress gating, which would undercut the
+shell removal above. The `code-mode` cargo feature is a no-op under
+`onprem` — the extension is never registered, so the model never sees it,
+and enabling it by name fails closed (`Unknown extension:
+code_execution`). This cannot be re-enabled at runtime or with feature
+flags.
 
 Operational notes:
 

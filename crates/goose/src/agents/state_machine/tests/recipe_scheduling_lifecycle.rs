@@ -9,15 +9,15 @@ use super::pipeline::{
 use crate::agents::extension::ExtensionConfig;
 use crate::agents::final_output_tool::{FINAL_OUTPUT_CONTINUATION_MESSAGE, FINAL_OUTPUT_TOOL_NAME};
 use crate::agents::platform_extensions::scheduler::MANAGE_SCHEDULE_TOOL_NAME_COMPLETE;
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::agents::state_machine::ops_tool_approval::TOOL_EXECUTABLE_KEY;
 use crate::agents::state_machine::MAX_TURNS_MESSAGE;
 use crate::agents::tool_execution::CHAT_MODE_TOOL_SKIPPED_RESPONSE;
 use crate::agents::types::{RetryConfig, SuccessCheck};
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::config::permission::PermissionLevel;
 use crate::config::GooseMode;
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::conversation::message::MessageContent;
 use crate::recipe::build_recipe::build_recipe_from_template;
 use crate::recipe::{Recipe, Response, SubRecipe};
@@ -221,7 +221,7 @@ async fn recipe_retry_and_final_output_run_to_completion() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 #[tokio::test]
 async fn unadvertised_final_output_is_neither_approved_nor_executed() -> Result<()> {
     let (pipeline, api) = test_pipeline().await?;

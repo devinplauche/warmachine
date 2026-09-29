@@ -11,7 +11,7 @@ use tracing::debug;
 use super::super::agents::Agent;
 use super::gen_ai_telemetry;
 use crate::agents::extension_manager::{get_tool_owner, recover_mangled_tool_name};
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::agents::platform_extensions::code_execution;
 use crate::config::{Config, GooseMode};
 use crate::conversation::message::{Message, MessageContent, MessageUsage, ToolRequest};
@@ -202,12 +202,12 @@ impl Agent {
         let tools = self.list_tools(session_id, None).await;
         ensure_unique_tool_names(&tools)?;
 
-        #[cfg(feature = "code-mode")]
+        #[cfg(all(feature = "code-mode", not(feature = "onprem")))]
         let code_execution_active = self
             .extension_manager
             .is_extension_enabled(code_execution::EXTENSION_NAME)
             .await;
-        #[cfg(not(feature = "code-mode"))]
+        #[cfg(any(not(feature = "code-mode"), feature = "onprem"))]
         let code_execution_active = false;
 
         let tools = prepare_inference_tools(tools, code_execution_active);
@@ -245,7 +245,7 @@ pub(crate) fn prepare_inference_tools(
     mut tools: Vec<Tool>,
     code_execution_active: bool,
 ) -> Vec<Tool> {
-    #[cfg(feature = "code-mode")]
+    #[cfg(all(feature = "code-mode", not(feature = "onprem")))]
     if code_execution_active {
         let disclosure_style =
             crate::agents::platform_extensions::code_execution::get_tool_disclosure();
@@ -291,7 +291,7 @@ pub(crate) fn prepare_inference_tools(
             .collect();
     }
 
-    #[cfg(not(feature = "code-mode"))]
+    #[cfg(any(not(feature = "code-mode"), feature = "onprem"))]
     let _ = code_execution_active;
 
     // Filter out tools not visible to the model per MCP Apps visibility spec.

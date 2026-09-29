@@ -1589,9 +1589,14 @@ impl GooseAcpAgent {
             PermissionOption::new(id.clone(), id, kind)
         }
         let options = vec![
+            // On-prem builds omit the durable "always" grants: they are degraded
+            // to AskBefore by the permission layer anyway, so offering them here
+            // would be misleading.
+            #[cfg(not(feature = "onprem"))]
             option(PermissionOptionKind::AllowAlways),
             option(PermissionOptionKind::AllowOnce),
             option(PermissionOptionKind::RejectOnce),
+            #[cfg(not(feature = "onprem"))]
             option(PermissionOptionKind::RejectAlways),
         ];
 

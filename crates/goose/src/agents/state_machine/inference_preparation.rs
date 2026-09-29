@@ -1,6 +1,6 @@
 //! Goose-specific inference request preparation.
 
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::agents::ExtensionManager;
 use crate::agents::PromptManager;
 use crate::config::GooseMode;
@@ -12,12 +12,12 @@ use goose_agent::inference::{InferenceRequestPreparer, PreparedInferenceRequest}
 use goose_agent::operation::{messages_since_kickoff, InferenceInput};
 use goose_providers::conversation::message::Message;
 use goose_providers::conversation::Conversation;
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct GooseInferenceRequestPreparer<'a> {
-    #[cfg(feature = "code-mode")]
+    #[cfg(all(feature = "code-mode", not(feature = "onprem")))]
     pub(crate) extension_manager: Arc<ExtensionManager>,
     pub(crate) goose_mode: &'a Mutex<GooseMode>,
     pub(crate) prompt_manager: &'a Mutex<PromptManager>,
@@ -33,14 +33,14 @@ impl InferenceRequestPreparer<Session> for GooseInferenceRequestPreparer<'_> {
         conversation: &Conversation,
         input: InferenceInput,
     ) -> Result<PreparedInferenceRequest> {
-        #[cfg(feature = "code-mode")]
+        #[cfg(all(feature = "code-mode", not(feature = "onprem")))]
         let code_execution_mode = self
             .extension_manager
             .is_extension_enabled(
                 crate::agents::platform_extensions::code_execution::EXTENSION_NAME,
             )
             .await;
-        #[cfg(not(feature = "code-mode"))]
+        #[cfg(any(not(feature = "code-mode"), feature = "onprem"))]
         let code_execution_mode = false;
 
         let goose_mode = *self.goose_mode.lock().await;

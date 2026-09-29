@@ -5,13 +5,13 @@ use super::calculator_extension::ADD;
 use super::pipeline::{
     test_pipeline, MessageKind::Agent, MessageKind::ToolResponse, MessageKind::User,
 };
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::agents::state_machine::ops_tool_approval::TOOL_EXECUTABLE_KEY;
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::config::permission::PermissionLevel;
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::config::GooseMode;
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 use crate::conversation::message::MessageContent;
 
 #[tokio::test]
@@ -89,7 +89,7 @@ async fn prompt_and_skill_lifecycle() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "code-mode")]
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 #[tokio::test]
 async fn unadvertised_load_skill_is_neither_approved_nor_loaded() -> Result<()> {
     let (pipeline, api) = test_pipeline().await?;

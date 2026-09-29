@@ -888,9 +888,10 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
 
         let provider_name: Option<String> = row.try_get("provider_name").ok().flatten();
         let model_config_json: Option<String> = row.try_get("model_config_json").ok().flatten();
-        let model_config = model_config_json
-            .as_deref()
-            .and_then(|json| deserialize_session_model_config(provider_name.as_deref(), json));
+        let model_config = model_config_json.as_deref().and_then(|json| {
+            let opened = open_session_column(json).ok()?;
+            deserialize_session_model_config(provider_name.as_deref(), &opened)
+        });
 
         let name: String = {
             let name_val: String = row.try_get("name").unwrap_or_default();
@@ -1282,7 +1283,7 @@ impl SessionStorage {
         };
 
         let model_config_json = match &session.model_config {
-            Some(model_config) => Some(serde_json::to_string(model_config)?),
+            Some(model_config) => Some(seal_json_column(&serde_json::to_string(model_config)?)?),
             None => None,
         };
 
@@ -1926,7 +1927,7 @@ impl SessionStorage {
         }
         if let Some(model_config) = builder.model_config {
             let model_config_json = model_config
-                .map(|mc| serde_json::to_string(&mc))
+                .map(|mc| seal_json_column(&serde_json::to_string(&mc)?))
                 .transpose()?;
             q = q.bind(model_config_json);
         }

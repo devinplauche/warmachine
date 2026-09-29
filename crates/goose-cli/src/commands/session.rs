@@ -285,6 +285,19 @@ pub async fn handle_session_export(
         }
     };
 
+    // On-prem audit: json/yaml exports dump full session content with no
+    // event of their own. The markdown branch is excluded below because
+    // export_session_to_markdown already records this event (and it must
+    // stay there: the ACP path reaches it without going through this
+    // handler), so this keeps the event exactly-once per invocation.
+    // Message count only — never content; mirrors the markdown payload.
+    #[cfg(feature = "onprem")]
+    let message_count = session
+        .conversation
+        .as_ref()
+        .map(|conversation| conversation.user_visible_messages().len())
+        .unwrap_or_default();
+
     let output = match format.as_str() {
         "json" => serde_json::to_string_pretty(&session)?,
         "yaml" => serde_yaml::to_string(&session)?,
@@ -296,6 +309,17 @@ pub async fn handle_session_export(
         }
         _ => return Err(anyhow::anyhow!("Unsupported format: {}", format)),
     };
+
+    #[cfg(feature = "onprem")]
+    if format != "markdown" {
+        if let Err(e) = warmachine::onprem::audit_event(
+            "session_export",
+            None,
+            &serde_json::json!({"messages": message_count}),
+        ) {
+            tracing::warn!("audit log write failed: {e:#}");
+        }
+    }
 
     #[cfg(feature = "nostr")]
     if nostr {

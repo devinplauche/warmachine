@@ -788,7 +788,7 @@ impl Operation<Session, GooseEffect> for ToolExecutionOperation<'_> {
         }
         let mut prompt_parts = hints.load_new_hints(&session.working_dir);
 
-        #[cfg(feature = "code-mode")]
+        #[cfg(all(feature = "code-mode", not(feature = "onprem")))]
         if self
             .extension_manager
             .is_extension_enabled(

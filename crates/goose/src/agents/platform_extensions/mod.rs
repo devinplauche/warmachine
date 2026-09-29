@@ -4,7 +4,12 @@ pub mod analyze;
 pub mod apps;
 #[cfg(feature = "chat-recall")]
 pub mod chatrecall;
-#[cfg(feature = "code-mode")]
+// Code Mode is compiled out of on-prem builds entirely, the same way the
+// developer shell tool was removed: execute_bash / execute_typescript run
+// arbitrary commands with the user's full network access, outside the
+// build's allowlist, so the capability is removed at compile time rather
+// than gated at runtime. This cannot be re-enabled with feature flags.
+#[cfg(all(feature = "code-mode", not(feature = "onprem")))]
 pub mod code_execution;
 pub mod developer;
 pub mod ext_manager;
@@ -151,7 +156,10 @@ pub static PLATFORM_EXTENSIONS: Lazy<HashMap<&'static str, PlatformExtensionDef>
             },
         );
 
-        #[cfg(feature = "code-mode")]
+        // On-prem builds compile Code Mode out entirely (see the module
+        // declaration above), so it is never registered and the model never
+        // sees execute_bash / execute_typescript.
+        #[cfg(all(feature = "code-mode", not(feature = "onprem")))]
         map.insert(
             code_execution::EXTENSION_NAME,
             PlatformExtensionDef {

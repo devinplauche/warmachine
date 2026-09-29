@@ -420,6 +420,30 @@ fn secret_storage(config_dir: &Path, _keyring_disabled: bool, _service: &str) ->
     }
 }
 
+/// Best-effort audit hook for the credential lifecycle (`credential_set`,
+/// `credential_removed`). The audit entry carries the secret's key name only
+/// — never the secret value. A failed audit write is logged but never fails
+/// the credential operation itself.
+#[cfg(feature = "onprem")]
+fn audit_credential_lifecycle(event: &str, key: &str) {
+    if let Err(e) = crate::onprem::audit_event(event, None, &serde_json::json!({"key": key})) {
+        tracing::warn!("audit log write failed: {e:#}");
+    }
+}
+
+/// `credential_removed` audit hook. The non-onprem variant is a no-op so the
+/// removal-tracking value stays consumed (and behavior identical) in both
+/// build variants.
+#[cfg(feature = "onprem")]
+fn audit_credential_removed(key: &str, removed: bool) {
+    if removed {
+        audit_credential_lifecycle("credential_removed", key);
+    }
+}
+
+#[cfg(not(feature = "onprem"))]
+fn audit_credential_removed(_key: &str, _removed: bool) {}
+
 impl Config {
     /// Get the global configuration instance.
     ///
@@ -1097,7 +1121,13 @@ impl Config {
         self.mutate_secrets(|values| {
             values.insert(key.to_string(), value);
             Ok(SecretMutation::Write(()))
-        })
+        })?;
+        // Security event: a credential was written. The audit entry carries
+        // the secret's key name only — never the secret value. Best-effort:
+        // the write stands even if the audit write fails.
+        #[cfg(feature = "onprem")]
+        audit_credential_lifecycle("credential_set", key);
+        Ok(())
     }
 
     pub(crate) fn update_secret<T, V, R>(
@@ -1141,7 +1171,15 @@ impl Config {
                 values.insert(key.clone(), value.clone());
             }
             Ok(SecretMutation::Write(()))
-        })
+        })?;
+        // Security event: one `credential_set` per stored key (identifier
+        // only, never the value). Best-effort: the write stands even if the
+        // audit write fails.
+        #[cfg(feature = "onprem")]
+        for (key, _) in updates {
+            audit_credential_lifecycle("credential_set", key);
+        }
+        Ok(())
     }
 
     /// Delete a secret from the system keyring.
@@ -1155,10 +1193,15 @@ impl Config {
     /// - There is an error accessing the keyring
     /// - There is an error serializing the remaining values
     pub fn delete_secret(&self, key: &str) -> Result<(), ConfigError> {
-        self.mutate_secrets(|values| {
-            values.remove(key);
-            Ok(SecretMutation::Write(()))
-        })
+        let removed = self.mutate_secrets(|values| {
+            let removed = values.remove(key).is_some();
+            Ok(SecretMutation::Write(removed))
+        })?;
+        // Security event: audited only when a credential was actually
+        // removed, carrying the key name only. Best-effort: the removal
+        // stands even if the audit write fails.
+        audit_credential_removed(key, removed);
+        Ok(())
     }
 
     /// Delete multiple secret values with one storage read and one storage write.
@@ -1167,12 +1210,22 @@ impl Config {
             return Ok(());
         }
 
-        self.mutate_secrets(|values| {
+        let removed = self.mutate_secrets(|values| {
+            let mut removed = Vec::new();
             for key in keys {
-                values.remove(key);
+                if values.remove(key).is_some() {
+                    removed.push(key.clone());
+                }
             }
-            Ok(SecretMutation::Write(()))
-        })
+            Ok(SecretMutation::Write(removed))
+        })?;
+        // Security event: one `credential_removed` per key actually removed
+        // (identifier only). Best-effort: the removal stands even if the
+        // audit write fails.
+        for key in &removed {
+            audit_credential_removed(key, true);
+        }
+        Ok(())
     }
 
     /// Read secrets from a YAML file
