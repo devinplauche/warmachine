@@ -7,8 +7,24 @@ const STORAGE_KEY = 'goose-chat-history';
 const MAX_MESSAGES = 500;
 const EXPIRY_DAYS = 30;
 
+// True only in the on-prem desktop variant (baked in at build time). Under
+// on-prem, prompt history must never touch disk: the backend seals session
+// data in SQLite, so the renderer's plaintext localStorage copy is disabled
+// and any pre-existing copy is wiped on load.
+const IS_ONPREM: boolean =
+  typeof __WARMACHINE_DESKTOP_ONPREM__ !== 'undefined' && __WARMACHINE_DESKTOP_ONPREM__;
+
+if (IS_ONPREM) {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Storage unavailable (e.g. blocked); nothing to wipe.
+  }
+}
+
 export class LocalMessageStorage {
   private static getStoredMessages(): StoredMessage[] {
+    if (IS_ONPREM) return [];
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (!stored) return [];
@@ -35,6 +51,7 @@ export class LocalMessageStorage {
   }
 
   private static setStoredMessages(messages: StoredMessage[]) {
+    if (IS_ONPREM) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
     } catch (error) {

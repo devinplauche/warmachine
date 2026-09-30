@@ -5,6 +5,11 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   define: {
     'process.env.GOOSE_TUNNEL': JSON.stringify(process.env.GOOSE_TUNNEL !== 'no' && process.env.GOOSE_TUNNEL !== 'none'),
+    // Build-time on-prem flag (set WARMACHINE_DESKTOP_ONPREM=1 when packaging
+    // the on-prem desktop variant). Baked in at build time like the Rust
+    // `onprem` cargo feature: it cannot be flipped at runtime.
+    __WARMACHINE_DESKTOP_ONPREM__:
+      JSON.stringify(process.env.WARMACHINE_DESKTOP_ONPREM === '1'),
   },
 
   plugins: [tailwindcss()],

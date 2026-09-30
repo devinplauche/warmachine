@@ -50,6 +50,10 @@ declare global {
     isCreatingRecipe?: boolean;
   }
 
+  // Build-time flag baked in by vite.renderer.config.mts from
+  // WARMACHINE_DESKTOP_ONPREM. True only in the on-prem desktop variant.
+  const __WARMACHINE_DESKTOP_ONPREM__: boolean;
+
   interface WindowEventMap {
     'add-active-session': CustomEvent<{
       sessionId: string;

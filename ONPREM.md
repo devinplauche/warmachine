@@ -82,6 +82,33 @@ Notes:
   an allowlist error, and the provider list must show only the on-prem
   OpenAI-compatible provider.
 
+## Building the on-prem Windows desktop app
+
+The Windows desktop app is produced by the
+`.github/workflows/bundle-windows-onprem.yml` workflow (manual trigger):
+
+1. Actions → "Bundle On-Prem CLI and Desktop (Windows)" → Run workflow.
+2. Enter the **on-prem base URL** (required) — it is baked into
+   `warmachine.exe` at compile time via `WARMACHINE_ONPREM_BASE_URL`.
+3. The workflow builds `warmachine.exe` with `--features onprem` on a
+   Windows runner, bundles it into the Electron app, builds the renderer
+   with `WARMACHINE_DESKTOP_ONPREM=1` (prompt history becomes memory-only),
+   and produces a **Squirrel installer** (`WarMachineSetup.exe`).
+4. The installer is uploaded as a workflow artifact
+   (`warmachine-onprem-windows-installer-unsigned`).
+
+Notes:
+
+- The installer is **unsigned** unless the `signing` option is enabled with
+  the signing environment (Azure Trusted Signing). For DoD distribution,
+  sign with the organization's own code-signing certificate; unsigned
+  installers trigger Windows SmartScreen warnings.
+- The Squirrel maker is opt-in via `WARMACHINE_DESKTOP_INSTALLER=squirrel`
+  so the standard pipeline keeps producing the portable zip unchanged.
+- The desktop's auto-updater is dead in all builds (`UPDATES_ENABLED=false`),
+  so Squirrel is install/uninstall only — there is no self-update channel
+  that could pull an unvetted binary.
+
 ## Audit log
 
 Location: `~/.config/warmachine/audit.log` (one JSON object per line).
@@ -391,11 +418,15 @@ to a SIEM:
 
 Honest gaps and residual risks, kept current so operators plan around them:
 
-- **Desktop prompt history.** The CLI keeps prompt history in memory only,
-  but the **desktop app** has no compile-time `onprem` flag and still
-  persists its own prompt history to disk. A desktop bundle is therefore
-  not an on-prem build for this surface; the on-prem target is the CLI
-  binary until the desktop carries the same gate.
+- **Desktop prompt history.** The CLI keeps prompt history in memory only.
+  The desktop app now has a build-time on-prem flag
+  (`WARMACHINE_DESKTOP_ONPREM=1`, baked in by vite at package time): when set,
+  the renderer's `LocalMessageStorage` is fully disabled and any pre-existing
+  plaintext history is wiped on load, so prompts live only in the backend's
+  sealed `sessions.db`. A desktop bundle built *without* that flag still
+  persists history to disk and is therefore not an on-prem build for this
+  surface — always produce desktop artifacts via the on-prem bundle workflow
+  below, never by hand.
 - **External advisory not independently verified.** One dependency advisory
   (GHSA-6mg9-3cvh-9939, cited in an external review) could not be
   reproduced or independently confirmed: the advisory ID returned 404 from

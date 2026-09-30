@@ -84,6 +84,27 @@ module.exports = {
         },
       },
     },
+    // Proper Windows installer (Squirrel). Opt-in via
+    // WARMACHINE_DESKTOP_INSTALLER=squirrel so the standard pipeline keeps
+    // producing the portable zip unchanged. Used by the on-prem Windows
+    // build; the bundled auto-updater stays dead (UPDATES_ENABLED=false), so
+    // Squirrel is install/uninstall only, no self-update channel.
+    ...(process.env.WARMACHINE_DESKTOP_INSTALLER === 'squirrel'
+      ? [
+          {
+            name: '@electron-forge/maker-squirrel',
+            platforms: ['win32'],
+            config: {
+              name: 'WarMachine',
+              setupExe: 'WarMachineSetup.exe',
+              setupIcon: 'src/images/icon.ico',
+              iconUrl:
+                'https://raw.githubusercontent.com/devinplauche/warmachine/main/ui/desktop/src/images/icon.ico',
+              loadingGif: 'src/images/icon-512.png',
+            },
+          },
+        ]
+      : []),
     {
       name: '@electron-forge/maker-deb',
       config: {

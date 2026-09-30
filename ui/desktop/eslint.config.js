@@ -70,6 +70,8 @@ module.exports = [
         clearTimeout: 'readonly',
         CustomEvent: 'readonly',
         EventTarget: 'readonly',
+        // Build-time constants injected by vite define (see vite.*.config.mts)
+        __WARMACHINE_DESKTOP_ONPREM__: 'readonly',
         Element: 'readonly',
         HTMLElement: 'readonly',
         HTMLAudioElement: 'readonly',
