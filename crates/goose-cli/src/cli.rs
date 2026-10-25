@@ -635,6 +635,12 @@ enum HarnessCommand {
         #[command(subcommand)]
         command: MemoryCommand,
     },
+    /// Inspect and manage the durable task ledger
+    #[command(about = "Inspect and manage the durable task ledger")]
+    Tasks {
+        #[command(subcommand)]
+        command: TasksCommand,
+    },
     /// Distill a session transcript into candidate memory records
     #[command(about = "Distill a transcript into candidate memory records")]
     Consolidate {
@@ -703,6 +709,88 @@ enum MemoryCommand {
     /// Print the session-start memory brief
     #[command(about = "Print the session-start memory brief")]
     Brief,
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum TasksCommand {
+    /// Create a task in the ledger
+    #[command(about = "Create a task")]
+    Add {
+        /// Who owns the work (e.g. scheduler:esbd-scan, cli)
+        #[arg(long, default_value = "cli")]
+        owner: String,
+        /// Next step note
+        #[arg(long)]
+        next_step: Option<String>,
+        /// Deadline: RFC 3339 or YYYY-MM-DD
+        #[arg(long)]
+        deadline: Option<String>,
+        /// Task title
+        title: Vec<String>,
+    },
+    /// List tasks
+    #[command(about = "List tasks")]
+    List {
+        /// Status filter: open, in_progress, failed, done, delivered, cancelled
+        #[arg(long)]
+        status: Option<String>,
+        /// Owner filter
+        #[arg(long)]
+        owner: Option<String>,
+        /// Only overdue open tasks
+        #[arg(long)]
+        overdue: bool,
+    },
+    /// Show one task with its history
+    #[command(about = "Show one task with its history")]
+    Show {
+        /// Task id
+        id: String,
+    },
+    /// Mark a task in progress
+    #[command(about = "Mark a task in progress")]
+    Start {
+        /// Task id
+        id: String,
+    },
+    /// Record a task's outcome (closes when its result is delivered)
+    #[command(about = "Record a task's outcome")]
+    Complete {
+        /// Task id
+        id: String,
+        /// The result text
+        result: Vec<String>,
+    },
+    /// Mark a task failed (it stays open and visible)
+    #[command(about = "Mark a task failed")]
+    Fail {
+        /// Task id
+        id: String,
+        /// Failure reason
+        reason: Vec<String>,
+    },
+    /// Cancel a task
+    #[command(about = "Cancel a task")]
+    Cancel {
+        /// Task id
+        id: String,
+    },
+    /// Append a note to a task's history
+    #[command(about = "Append a note to a task's history")]
+    Note {
+        /// Task id
+        id: String,
+        /// Note text
+        note: Vec<String>,
+    },
+    /// Deliver all completed tasks' results to the deliveries file, exactly once each
+    #[command(about = "Deliver completed task results (exactly once)")]
+    Deliver {
+        /// Deliveries file (default: deliveries.md in the config dir)
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
 
 /// On-prem audit log commands (only compiled in the on-prem build).
@@ -2222,6 +2310,158 @@ async fn handle_harness_command(command: HarnessCommand) -> Result<()> {
                             println!("(memory is empty)");
                         } else {
                             println!("{brief}");
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            store.close().await;
+            result
+        }
+        HarnessCommand::Tasks { command } => {
+            use warmachine::harness::{FileDeliveryChannel, NewTask, TaskStatus, TaskStore};
+
+            fn parse_deadline(text: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+                if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(text) {
+                    return Ok(parsed.with_timezone(&chrono::Utc));
+                }
+                let date = chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+                    .map_err(|_| anyhow::anyhow!("deadline must be RFC 3339 or YYYY-MM-DD"))?;
+                let end_of_day = date
+                    .and_hms_opt(23, 59, 59)
+                    .ok_or_else(|| anyhow::anyhow!("invalid deadline date"))?;
+                Ok(chrono::DateTime::from_naive_utc_and_offset(
+                    end_of_day,
+                    chrono::Utc,
+                ))
+            }
+
+            fn print_task(task: &warmachine::harness::Task) {
+                let mut line = format!(
+                    "{} [{}] {} — owner {}",
+                    task.id,
+                    task.status.as_str(),
+                    task.title,
+                    task.owner
+                );
+                if let Some(deadline) = &task.deadline {
+                    line.push_str(&format!(", due {}", deadline.format("%Y-%m-%d")));
+                }
+                if let Some(next) = &task.next_step {
+                    line.push_str(&format!(", next: {next}"));
+                }
+                println!("{line}");
+                if let Some(result) = &task.result {
+                    println!("  result: {result}");
+                }
+            }
+
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let store = TaskStore::open(&db_path).await?;
+            let result = async {
+                match command {
+                    TasksCommand::Add {
+                        owner,
+                        next_step,
+                        deadline,
+                        title,
+                    } => {
+                        let task = store
+                            .create(
+                                NewTask {
+                                    title: title.join(" "),
+                                    owner,
+                                    next_step,
+                                    deadline: deadline
+                                        .as_deref()
+                                        .map(parse_deadline)
+                                        .transpose()?,
+                                },
+                                "cli",
+                            )
+                            .await?;
+                        print_task(&task);
+                        Ok(())
+                    }
+                    TasksCommand::List {
+                        status,
+                        owner,
+                        overdue,
+                    } => {
+                        let status = match status.as_deref() {
+                            None => None,
+                            Some(other) => Some(TaskStatus::from_str(other)?),
+                        };
+                        let tasks = store.list(status, owner.as_deref(), overdue).await?;
+                        if tasks.is_empty() {
+                            println!("(no tasks)");
+                        }
+                        for task in &tasks {
+                            print_task(task);
+                        }
+                        Ok(())
+                    }
+                    TasksCommand::Show { id } => {
+                        let task = store
+                            .get(&id)
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("no task {id}"))?;
+                        print_task(&task);
+                        for event in store.history(&id).await? {
+                            match &event.detail {
+                                Some(detail) => println!(
+                                    "  {} {} by {} — {}",
+                                    event.at.format("%Y-%m-%d %H:%M UTC"),
+                                    event.event,
+                                    event.actor,
+                                    detail
+                                ),
+                                None => println!(
+                                    "  {} {} by {}",
+                                    event.at.format("%Y-%m-%d %H:%M UTC"),
+                                    event.event,
+                                    event.actor
+                                ),
+                            }
+                        }
+                        Ok(())
+                    }
+                    TasksCommand::Start { id } => {
+                        print_task(&store.start(&id, "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Complete { id, result } => {
+                        print_task(&store.complete(&id, &result.join(" "), "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Fail { id, reason } => {
+                        print_task(&store.fail(&id, &reason.join(" "), "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Cancel { id } => {
+                        print_task(&store.cancel(&id, "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Note { id, note } => {
+                        store.add_note(&id, &note.join(" "), "cli").await?;
+                        println!("noted on {id}");
+                        Ok(())
+                    }
+                    TasksCommand::Deliver { out } => {
+                        let path = out.unwrap_or_else(|| {
+                            warmachine::config::paths::Paths::in_config_dir("deliveries.md")
+                        });
+                        let channel = FileDeliveryChannel { path: path.clone() };
+                        let report = store.deliver_pending(&channel, "cli").await?;
+                        println!(
+                            "delivered {} task(s) to {}; {} failed",
+                            report.delivered.len(),
+                            path.display(),
+                            report.failed.len()
+                        );
+                        for (id, error) in &report.failed {
+                            println!("  delivery failed for {id}: {error}");
                         }
                         Ok(())
                     }

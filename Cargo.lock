@@ -5300,6 +5300,7 @@ name = "goose-harness"
 version = "0.1.0-alpha.9"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "serde",
  "serde_json",
