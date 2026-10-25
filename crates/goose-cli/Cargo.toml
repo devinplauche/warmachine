@@ -126,6 +126,7 @@ system-keyring = ["warmachine/system-keyring"]
 update = ["dep:sigstore-verify", "dep:snap"]
 bundled-mcp = ["dep:goose-mcp", "goose-mcp/bundled-mcp"]
 scheduler = ["warmachine/scheduler"]
+harness = ["warmachine/harness"]
 platform-apps = ["warmachine/platform-apps"]
 chat-recall = ["warmachine/chat-recall"]
 # On-prem builds must never self-update from the public internet: imply

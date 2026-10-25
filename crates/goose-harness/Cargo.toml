@@ -1,0 +1,20 @@
+[package]
+name = "goose-harness"
+version = "0.1.0-alpha.9"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Principal layer for WarMachine: memory, tasks, daemon, approvals, connectors, workers"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

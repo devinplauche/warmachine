@@ -22,6 +22,8 @@ pub mod elicitation;
 pub mod execution;
 pub mod gateway;
 pub mod goose_apps;
+#[cfg(feature = "harness")]
+pub use goose_harness as harness;
 pub mod hints;
 pub mod hooks;
 pub mod instance_id;

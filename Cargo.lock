@@ -5296,6 +5296,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "goose-harness"
+version = "0.1.0-alpha.9"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
 name = "goose-local-inference"
 version = "0.1.0-alpha.9"
 dependencies = [
@@ -14276,6 +14286,7 @@ dependencies = [
  "goose-agent",
  "goose-context-management",
  "goose-download-manager",
+ "goose-harness",
  "goose-mcp",
  "goose-providers",
  "goose-sdk-types",

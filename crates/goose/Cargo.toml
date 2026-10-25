@@ -123,6 +123,9 @@ platform-apps = []
 chat-recall = []
 scheduler = ["dep:tokio-cron-scheduler"]
 acp-http = ["dep:agent-client-protocol-http"]
+# Principal layer (memory, tasks, daemon, approvals, connectors, workers).
+# Personal profile only: never added to the onprem feature set (AC-7.3).
+harness = ["dep:goose-harness"]
 
 [lints]
 workspace = true
@@ -278,6 +281,7 @@ icu_locale = { version = "=2.1.1", default-features = false }
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 subtle = { version = "2.5", default-features = false, features = ["std"] }
 gethostname = "1.1.0"
+goose-harness = { version = "0.1.0-alpha.9", path = "../goose-harness", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { workspace = true, features = ["accctrl", "aclapi", "fileapi", "handleapi", "minwinbase", "sddl", "securitybaseapi", "winbase", "winerror"] }
