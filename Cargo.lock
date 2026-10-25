@@ -5300,9 +5300,13 @@ name = "goose-harness"
 version = "0.1.0-alpha.9"
 dependencies = [
  "anyhow",
+ "chrono",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sqlx",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

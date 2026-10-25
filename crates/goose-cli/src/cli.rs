@@ -629,6 +629,80 @@ enum HarnessCommand {
     /// Print the effective harness configuration parsed from config.yaml
     #[command(about = "Print the effective harness configuration")]
     Config,
+    /// Inspect and manage the persistent memory store
+    #[command(about = "Inspect and manage the persistent memory store")]
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
+    /// Distill a session transcript into candidate memory records
+    #[command(about = "Distill a transcript into candidate memory records")]
+    Consolidate {
+        /// Path to the transcript text file
+        path: std::path::PathBuf,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum MemoryCommand {
+    /// Write a memory record (supersedes the active record with the same kind + subject)
+    #[command(about = "Write a memory record")]
+    Add {
+        /// Record kind: fact, preference, person, or decision
+        #[arg(long, default_value = "fact")]
+        kind: String,
+        /// Optional subject used for supersession (e.g. "timezone")
+        #[arg(long)]
+        subject: Option<String>,
+        /// The record content
+        content: Vec<String>,
+    },
+    /// List memory records
+    #[command(about = "List memory records")]
+    List {
+        /// Status filter: active, candidate, superseded, or all
+        #[arg(long)]
+        status: Option<String>,
+        /// Kind filter: fact, preference, person, or decision
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Search active memory records
+    #[command(about = "Search active memory records")]
+    Search {
+        /// Search text
+        query: Vec<String>,
+    },
+    /// Show one memory record in full
+    #[command(about = "Show one memory record")]
+    Show {
+        /// Record id
+        id: String,
+    },
+    /// Replace a record's content (the old record is superseded)
+    #[command(about = "Correct a memory record")]
+    Correct {
+        /// Record id
+        id: String,
+        /// The corrected content
+        content: Vec<String>,
+    },
+    /// Delete a memory record permanently
+    #[command(about = "Delete a memory record")]
+    Delete {
+        /// Record id
+        id: String,
+    },
+    /// Approve a consolidation candidate into active memory
+    #[command(about = "Approve a candidate memory record")]
+    Approve {
+        /// Record id
+        id: String,
+    },
+    /// Print the session-start memory brief
+    #[command(about = "Print the session-start memory brief")]
+    Brief,
 }
 
 /// On-prem audit log commands (only compiled in the on-prem build).
@@ -1986,20 +2060,176 @@ async fn handle_serve_command(args: ServeCommandArgs) -> Result<()> {
 /// Handle `warmachine harness ...` (harness builds only).
 #[cfg(feature = "harness")]
 async fn handle_harness_command(command: HarnessCommand) -> Result<()> {
+    use std::str::FromStr;
+    use warmachine::harness::{MemoryKind, MemoryStore, NewRecord, RecordStatus};
+
+    fn load_harness_config() -> Result<(warmachine::harness::HarnessConfig, std::path::PathBuf)> {
+        let path = warmachine::config::paths::Paths::in_config_dir("config.yaml");
+        let yaml = if path.exists() {
+            std::fs::read_to_string(&path)?
+        } else {
+            String::new()
+        };
+        let config = warmachine::harness::config::parse_harness_config(&yaml)
+            .map_err(|e| anyhow::anyhow!("invalid harness config in {}: {e}", path.display()))?;
+        Ok((config, path))
+    }
+
+    async fn open_memory() -> Result<(MemoryStore, warmachine::harness::HarnessConfig)> {
+        let (config, _) = load_harness_config()?;
+        if !config.memory.enabled {
+            anyhow::bail!("harness memory is disabled (harness.memory.enabled = false)");
+        }
+        let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+        let store = MemoryStore::open(&db_path).await?;
+        Ok((store, config))
+    }
+
+    fn print_record(record: &warmachine::harness::MemoryRecord) {
+        match &record.subject {
+            Some(subject) => println!(
+                "{} [{}] {} — {} ({}, {})\n  {}",
+                record.id,
+                record.kind.as_str(),
+                subject,
+                record.content,
+                record.status.as_str(),
+                record.source,
+                record.created_at.format("%Y-%m-%d %H:%M UTC")
+            ),
+            None => println!(
+                "{} [{}] {} ({}, {})\n  {}",
+                record.id,
+                record.kind.as_str(),
+                record.content,
+                record.status.as_str(),
+                record.source,
+                record.created_at.format("%Y-%m-%d %H:%M UTC")
+            ),
+        }
+    }
+
     match command {
         HarnessCommand::Config => {
-            let path = warmachine::config::paths::Paths::in_config_dir("config.yaml");
-            let yaml = if path.exists() {
-                std::fs::read_to_string(&path)?
-            } else {
-                String::new()
-            };
-            let config = warmachine::harness::config::parse_harness_config(&yaml).map_err(|e| {
-                anyhow::anyhow!("invalid harness config in {}: {e}", path.display())
-            })?;
+            let (config, path) = load_harness_config()?;
             println!("# effective harness config ({})", path.display());
             print!("{}", serde_yaml::to_string(&config)?);
             Ok(())
+        }
+        HarnessCommand::Consolidate { path } => {
+            let (store, _config) = open_memory().await?;
+            let transcript = std::fs::read_to_string(&path)?;
+            let report =
+                warmachine::harness::consolidate(&store, &transcript, "consolidation:cli").await?;
+            store.close().await;
+            println!(
+                "stored {} candidate(s); rejected {}",
+                report.stored.len(),
+                report.rejected.len()
+            );
+            for record in &report.stored {
+                print_record(record);
+            }
+            for reason in &report.rejected {
+                println!("rejected: {reason}");
+            }
+            Ok(())
+        }
+        HarnessCommand::Memory { command } => {
+            let (store, config) = open_memory().await?;
+            let result = async {
+                match command {
+                    MemoryCommand::Add {
+                        kind,
+                        subject,
+                        content,
+                    } => {
+                        let record = store
+                            .write(
+                                NewRecord {
+                                    kind: MemoryKind::from_str(&kind)?,
+                                    subject,
+                                    content: content.join(" "),
+                                    source: "cli".to_string(),
+                                },
+                                false,
+                            )
+                            .await?;
+                        print_record(&record);
+                        Ok(())
+                    }
+                    MemoryCommand::List { status, kind } => {
+                        let status = match status.as_deref() {
+                            None | Some("all") => None,
+                            Some(other) => Some(RecordStatus::from_str(other)?),
+                        };
+                        let kind = match kind.as_deref() {
+                            None => None,
+                            Some(other) => Some(MemoryKind::from_str(other)?),
+                        };
+                        let records = store.list(status, kind).await?;
+                        if records.is_empty() {
+                            println!("(no records)");
+                        }
+                        for record in &records {
+                            print_record(record);
+                        }
+                        Ok(())
+                    }
+                    MemoryCommand::Search { query } => {
+                        let records = store.search(&query.join(" ")).await?;
+                        if records.is_empty() {
+                            println!("(no matches)");
+                        }
+                        for record in &records {
+                            print_record(record);
+                        }
+                        Ok(())
+                    }
+                    MemoryCommand::Show { id } => match store.get(&id).await? {
+                        Some(record) => {
+                            print_record(&record);
+                            if let Some(old) = &record.supersedes {
+                                println!("  supersedes: {old}");
+                            }
+                            Ok(())
+                        }
+                        None => anyhow::bail!("no memory record {id}"),
+                    },
+                    MemoryCommand::Correct { id, content } => {
+                        let record = store.correct(&id, &content.join(" "), "cli").await?;
+                        print_record(&record);
+                        Ok(())
+                    }
+                    MemoryCommand::Delete { id } => {
+                        if store.delete(&id).await? {
+                            println!("deleted {id}");
+                            Ok(())
+                        } else {
+                            anyhow::bail!("no memory record {id}")
+                        }
+                    }
+                    MemoryCommand::Approve { id } => {
+                        let record = store.approve(&id).await?;
+                        print_record(&record);
+                        Ok(())
+                    }
+                    MemoryCommand::Brief => {
+                        let brief = store
+                            .build_brief(config.memory.brief_max_tokens as usize)
+                            .await?;
+                        if brief.is_empty() {
+                            println!("(memory is empty)");
+                        } else {
+                            println!("{brief}");
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            store.close().await;
+            result
         }
     }
 }

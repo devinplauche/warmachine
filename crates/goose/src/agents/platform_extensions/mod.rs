@@ -13,6 +13,8 @@ pub mod chatrecall;
 pub mod code_execution;
 pub mod developer;
 pub mod ext_manager;
+#[cfg(all(feature = "harness", not(feature = "onprem")))]
+pub mod memory;
 pub mod orchestrator;
 #[cfg(feature = "scheduler")]
 pub mod scheduler;
@@ -65,6 +67,21 @@ pub static PLATFORM_EXTENSIONS: Lazy<HashMap<&'static str, PlatformExtensionDef>
                 unprefixed_tools: false,
                 hidden: false,
                 client_factory: |ctx| Some(Box::new(todo::TodoClient::new(ctx).unwrap())),
+            },
+        );
+
+        #[cfg(all(feature = "harness", not(feature = "onprem")))]
+        map.insert(
+            memory::EXTENSION_NAME,
+            PlatformExtensionDef {
+                name: memory::EXTENSION_NAME,
+                display_name: "Memory",
+                description:
+                    "Persistent long-term memory across sessions (harness principal layer)",
+                default_enabled: true,
+                unprefixed_tools: false,
+                hidden: false,
+                client_factory: |ctx| Some(Box::new(memory::MemoryClient::new(ctx).unwrap())),
             },
         );
 

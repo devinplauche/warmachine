@@ -9,7 +9,12 @@
 //! own phase, gated by the project's acceptance criteria.
 
 pub mod config;
+pub mod memory;
 
 pub use config::{
     ActionClass, ActionClasses, DaemonConfig, DeliveryConfig, HarnessConfig, MemoryConfig,
+};
+pub use memory::{
+    consolidate, extract_candidates, ConsolidationReport, MemoryKind, MemoryRecord, MemoryStore,
+    NewRecord, RecordStatus, WritePolicy,
 };
