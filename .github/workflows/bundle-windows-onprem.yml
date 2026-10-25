@@ -68,7 +68,12 @@ jobs:
         env:
           WARMACHINE_ONPREM_BASE_URL: ${{ inputs.onprem_base_url }}
         run: |
-          cargo build --release --target x86_64-pc-windows-msvc -p goose-cli --bin warmachine --features onprem
+          # --no-default-features with an explicit list is load-bearing:
+          # the CLI default set includes `harness` (personal profile), and
+          # harness code must never enter the on-prem binary (AC-7.3). This
+          # list is the pre-harness default set plus onprem; keep it in
+          # sync with the rust-check-onprem job in ci.yml.
+          cargo build --release --target x86_64-pc-windows-msvc -p goose-cli --bin warmachine --no-default-features --features code-mode,tree-sitter,local-inference,aws-providers,telemetry,nostr,otel,rustls-tls,live-voice,system-keyring,update,bundled-mcp,scheduler,platform-apps,chat-recall,acp-http,onprem
 
           $binaryPath = "./target/x86_64-pc-windows-msvc/release/warmachine.exe"
           if (-not (Test-Path $binaryPath)) {

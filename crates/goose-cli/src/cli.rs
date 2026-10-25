@@ -622,6 +622,15 @@ enum SessionCommand {
     PurgeExpired,
 }
 
+/// Harness commands (only compiled in the harness build).
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum HarnessCommand {
+    /// Print the effective harness configuration parsed from config.yaml
+    #[command(about = "Print the effective harness configuration")]
+    Config,
+}
+
 /// On-prem audit log commands (only compiled in the on-prem build).
 #[cfg(feature = "onprem")]
 #[derive(Subcommand)]
@@ -1064,6 +1073,14 @@ enum Command {
         command: SchedulerCommand,
     },
 
+    /// Inspect the harness (principal layer)
+    #[cfg(feature = "harness")]
+    #[command(about = "Inspect the harness (principal layer)")]
+    Harness {
+        #[command(subcommand)]
+        command: HarnessCommand,
+    },
+
     /// Manage gateways for external platform integrations (e.g., Telegram)
     #[command(
         about = "Manage gateways for external platform integrations",
@@ -1437,6 +1454,8 @@ fn get_command_name(command: &Option<Command>) -> &'static str {
         Some(Command::Gateway { .. }) => "gateway",
         #[cfg(feature = "scheduler")]
         Some(Command::Schedule { .. }) => "schedule",
+        #[cfg(feature = "harness")]
+        Some(Command::Harness { .. }) => "harness",
         #[cfg(feature = "update")]
         Some(Command::Update { .. }) => "update",
         Some(Command::Recipe { .. }) => "recipe",
@@ -1962,6 +1981,27 @@ async fn handle_serve_command(args: ServeCommandArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Handle `warmachine harness ...` (harness builds only).
+#[cfg(feature = "harness")]
+async fn handle_harness_command(command: HarnessCommand) -> Result<()> {
+    match command {
+        HarnessCommand::Config => {
+            let path = warmachine::config::paths::Paths::in_config_dir("config.yaml");
+            let yaml = if path.exists() {
+                std::fs::read_to_string(&path)?
+            } else {
+                String::new()
+            };
+            let config = warmachine::harness::config::parse_harness_config(&yaml).map_err(|e| {
+                anyhow::anyhow!("invalid harness config in {}: {e}", path.display())
+            })?;
+            println!("# effective harness config ({})", path.display());
+            print!("{}", serde_yaml::to_string(&config)?);
+            Ok(())
+        }
+    }
 }
 
 /// Handle `warmachine audit ...` (on-prem builds only).
@@ -2986,6 +3026,8 @@ pub async fn cli() -> anyhow::Result<()> {
         Some(Command::Gateway { command }) => handle_gateway_command(command).await,
         #[cfg(feature = "scheduler")]
         Some(Command::Schedule { command }) => handle_schedule_command(command).await,
+        #[cfg(feature = "harness")]
+        Some(Command::Harness { command }) => handle_harness_command(command).await,
         #[cfg(feature = "update")]
         Some(Command::Update {
             canary,

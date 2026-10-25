@@ -106,6 +106,7 @@ default = [
     "update",
     "bundled-mcp",
     "scheduler",
+    "harness",
     "platform-apps",
     "chat-recall",
     "acp-http",

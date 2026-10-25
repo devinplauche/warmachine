@@ -22,7 +22,7 @@ components in internal-only form.
 
 ## Decisions
 
-### D1 — Storage: SQLite via sqlx, one dedicated database
+### D1 — Storage: SQLite via sqlx, one dedicated database (approved by Devin, 2026-10-25)
 
 Memory records (Phase 1) and the task ledger (Phase 2) live in a dedicated
 SQLite database, `harness.db`, in the WarMachine config directory,
@@ -54,14 +54,16 @@ feature boundary is what makes AC-7.3 mechanically checkable.
 
 - `goose-harness`: no features of its own in Phase 0.
 - Core crate (`crates/goose`): `harness = ["dep:goose-harness"]`.
-- CLI (`crates/goose-cli`): `harness = ["warmachine/harness"]` as an
-  opt-in feature. It is deliberately **not** in the CLI `default` set:
-  `bundle-windows-onprem.yml` builds the CLI with `--features onprem`
-  and default features enabled, so anything in the CLI default set is
-  compiled into the on-prem binary. (Upstream features such as
-  `scheduler` already ride in that way; the harness does not get to.)
-  Personal distribution builds enable `harness` explicitly, the same way
-  the on-prem bundle enables `onprem`.
+- CLI (`crates/goose-cli`): `harness = ["warmachine/harness"]`, and
+  `harness` is in the CLI `default` set (Devin's decision, 2026-10-25:
+  the harness is the product, not an opt-in extra). That makes the
+  on-prem bundle the place where the boundary is enforced instead:
+  `bundle-windows-onprem.yml` previously built the CLI with
+  `--features onprem` and default features enabled, which would have
+  compiled the harness into the on-prem binary once `harness` became a
+  default. The bundle now builds with `--no-default-features` and an
+  explicit feature list (the pre-harness default set plus `onprem`), so
+  harness code never enters the locked-down binary (AC-7.3).
 - The `onprem` feature sets in both crates are **not** modified. The
   on-prem CI job compiles an explicit feature list that does not include
   `harness`; AC-7.1/AC-7.3 are verified against that list each phase.
