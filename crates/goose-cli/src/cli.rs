@@ -622,6 +622,348 @@ enum SessionCommand {
     PurgeExpired,
 }
 
+/// Harness commands (only compiled in the harness build).
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum HarnessCommand {
+    /// Print the effective harness configuration parsed from config.yaml
+    #[command(about = "Print the effective harness configuration")]
+    Config,
+    /// Inspect and manage the persistent memory store
+    #[command(about = "Inspect and manage the persistent memory store")]
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
+    /// Inspect and manage the durable task ledger
+    #[command(about = "Inspect and manage the durable task ledger")]
+    Tasks {
+        #[command(subcommand)]
+        command: TasksCommand,
+    },
+    /// Distill a session transcript into candidate memory records
+    #[command(about = "Distill a transcript into candidate memory records")]
+    Consolidate {
+        /// Path to the transcript text file
+        path: std::path::PathBuf,
+    },
+    /// Inspect and decide queued approval requests
+    #[command(about = "Inspect and decide queued approval requests")]
+    Approvals {
+        #[command(subcommand)]
+        command: ApprovalsCommand,
+    },
+    /// Inspect and verify the hash-chained audit log
+    #[command(about = "Inspect and verify the hash-chained audit log")]
+    Audit {
+        #[command(subcommand)]
+        command: HarnessAuditCommand,
+    },
+    /// Manage connectors and their connection state
+    #[command(about = "Manage connectors and their connection state")]
+    Connectors {
+        #[command(subcommand)]
+        command: ConnectorsCommand,
+    },
+    /// Manage secrets in the OS-keychain vault (values are never printed)
+    #[command(about = "Manage vault secrets (values are never printed)")]
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum ConnectorsCommand {
+    /// List configured connectors and whether their secrets are present
+    #[command(about = "List configured connectors")]
+    List,
+    /// Show connector status; --check also runs the MCP health handshake
+    #[command(about = "Show connector status")]
+    Status {
+        /// Run a live health check (MCP initialize) for configured connectors
+        #[arg(long)]
+        check: bool,
+    },
+    /// Guided connect: store the connector's secrets in the vault, then health-check
+    #[command(about = "Guided connect flow for one connector")]
+    Connect {
+        /// Connector name from config
+        name: String,
+    },
+    /// Remove the connector's secrets from the vault
+    #[command(about = "Disconnect a connector (removes its vault secrets)")]
+    Disconnect {
+        /// Connector name from config
+        name: String,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum VaultCommand {
+    /// Store a secret (prompted without echo, or read from stdin when piped)
+    #[command(about = "Store a secret in the vault")]
+    Set {
+        /// Vault account name
+        account: String,
+    },
+    /// Delete a secret from the vault
+    #[command(about = "Delete a secret from the vault")]
+    Delete {
+        /// Vault account name
+        account: String,
+    },
+    /// Check whether a secret exists (never prints the value)
+    #[command(about = "Check whether a secret exists")]
+    Has {
+        /// Vault account name
+        account: String,
+    },
+    /// List known vault accounts (names only, from the index)
+    #[command(about = "List known vault accounts")]
+    List,
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum ApprovalsCommand {
+    /// List approval requests
+    #[command(about = "List approval requests")]
+    List {
+        /// Status filter: pending, approved, denied, expired
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Show one approval request
+    #[command(about = "Show one approval request")]
+    Show {
+        /// Request id
+        id: String,
+    },
+    /// Approve a pending request
+    #[command(about = "Approve a pending request")]
+    Approve {
+        /// Request id
+        id: String,
+        /// Decision note
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Deny a pending request
+    #[command(about = "Deny a pending request")]
+    Deny {
+        /// Request id
+        id: String,
+        /// Decision note
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Queue a new approval request (for scripts and scheduled jobs)
+    #[command(about = "Queue a new approval request")]
+    Request {
+        /// Action name (usually the tool name)
+        action: String,
+        /// Who is asking (e.g. scheduler:esbd-scan)
+        #[arg(long, default_value = "cli")]
+        origin: String,
+        /// Arguments as JSON
+        #[arg(long, default_value = "{}")]
+        args: String,
+        /// Minutes before the request expires into a denial
+        #[arg(long)]
+        expiry_minutes: Option<u64>,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum HarnessAuditCommand {
+    /// Show the most recent audit entries
+    #[command(about = "Show the most recent audit entries")]
+    List {
+        /// How many entries to show
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Verify the hash chain end to end
+    #[command(about = "Verify the hash chain")]
+    Verify,
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum MemoryCommand {
+    /// Write a memory record (supersedes the active record with the same kind + subject)
+    #[command(about = "Write a memory record")]
+    Add {
+        /// Record kind: fact, preference, person, or decision
+        #[arg(long, default_value = "fact")]
+        kind: String,
+        /// Optional subject used for supersession (e.g. "timezone")
+        #[arg(long)]
+        subject: Option<String>,
+        /// The record content
+        content: Vec<String>,
+    },
+    /// List memory records
+    #[command(about = "List memory records")]
+    List {
+        /// Status filter: active, candidate, superseded, or all
+        #[arg(long)]
+        status: Option<String>,
+        /// Kind filter: fact, preference, person, or decision
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Search active memory records
+    #[command(about = "Search active memory records")]
+    Search {
+        /// Search text
+        query: Vec<String>,
+    },
+    /// Show one memory record in full
+    #[command(about = "Show one memory record")]
+    Show {
+        /// Record id
+        id: String,
+    },
+    /// Replace a record's content (the old record is superseded)
+    #[command(about = "Correct a memory record")]
+    Correct {
+        /// Record id
+        id: String,
+        /// The corrected content
+        content: Vec<String>,
+    },
+    /// Delete a memory record permanently
+    #[command(about = "Delete a memory record")]
+    Delete {
+        /// Record id
+        id: String,
+    },
+    /// Approve a consolidation candidate into active memory
+    #[command(about = "Approve a candidate memory record")]
+    Approve {
+        /// Record id
+        id: String,
+    },
+    /// Print the session-start memory brief
+    #[command(about = "Print the session-start memory brief")]
+    Brief,
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum TasksCommand {
+    /// Create a task in the ledger
+    #[command(about = "Create a task")]
+    Add {
+        /// Who owns the work (e.g. scheduler:esbd-scan, cli)
+        #[arg(long, default_value = "cli")]
+        owner: String,
+        /// Next step note
+        #[arg(long)]
+        next_step: Option<String>,
+        /// Deadline: RFC 3339 or YYYY-MM-DD
+        #[arg(long)]
+        deadline: Option<String>,
+        /// Task title
+        title: Vec<String>,
+    },
+    /// List tasks
+    #[command(about = "List tasks")]
+    List {
+        /// Status filter: open, in_progress, failed, done, delivered, cancelled
+        #[arg(long)]
+        status: Option<String>,
+        /// Owner filter
+        #[arg(long)]
+        owner: Option<String>,
+        /// Only overdue open tasks
+        #[arg(long)]
+        overdue: bool,
+    },
+    /// Show one task with its history
+    #[command(about = "Show one task with its history")]
+    Show {
+        /// Task id
+        id: String,
+    },
+    /// Mark a task in progress
+    #[command(about = "Mark a task in progress")]
+    Start {
+        /// Task id
+        id: String,
+    },
+    /// Record a task's outcome (closes when its result is delivered)
+    #[command(about = "Record a task's outcome")]
+    Complete {
+        /// Task id
+        id: String,
+        /// The result text
+        result: Vec<String>,
+    },
+    /// Mark a task failed (it stays open and visible)
+    #[command(about = "Mark a task failed")]
+    Fail {
+        /// Task id
+        id: String,
+        /// Failure reason
+        reason: Vec<String>,
+    },
+    /// Cancel a task
+    #[command(about = "Cancel a task")]
+    Cancel {
+        /// Task id
+        id: String,
+    },
+    /// Append a note to a task's history
+    #[command(about = "Append a note to a task's history")]
+    Note {
+        /// Task id
+        id: String,
+        /// Note text
+        note: Vec<String>,
+    },
+    /// Deliver all completed tasks' results to the deliveries file, exactly once each
+    #[command(about = "Deliver completed task results (exactly once)")]
+    Deliver {
+        /// Deliveries file (default: deliveries.md in the config dir)
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+}
+
+/// Daemon commands (harness builds only).
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum DaemonCommand {
+    /// Run the daemon in the foreground (scheduler + webhook + delivery)
+    #[command(about = "Run the daemon in the foreground")]
+    Run,
+    /// Show the running daemon's state
+    #[command(about = "Show the running daemon's state")]
+    Status,
+    /// Stop the running daemon
+    #[command(about = "Stop the running daemon")]
+    Stop,
+    /// Print the systemd user unit for the daemon
+    #[command(about = "Print the systemd user unit")]
+    Unit,
+}
+
+#[cfg(feature = "harness")]
+async fn handle_daemon_command(command: DaemonCommand) -> Result<()> {
+    match command {
+        DaemonCommand::Run => crate::commands::daemon::run_daemon().await,
+        DaemonCommand::Status => crate::commands::daemon::daemon_status().await,
+        DaemonCommand::Stop => crate::commands::daemon::daemon_stop().await,
+        DaemonCommand::Unit => crate::commands::daemon::daemon_unit(),
+    }
+}
+
 /// On-prem audit log commands (only compiled in the on-prem build).
 #[cfg(feature = "onprem")]
 #[derive(Subcommand)]
@@ -1064,6 +1406,22 @@ enum Command {
         command: SchedulerCommand,
     },
 
+    /// Inspect the harness (principal layer)
+    #[cfg(feature = "harness")]
+    #[command(about = "Inspect the harness (principal layer)")]
+    Harness {
+        #[command(subcommand)]
+        command: HarnessCommand,
+    },
+
+    /// Run and inspect the harness daemon (scheduler + triggers + delivery)
+    #[cfg(feature = "harness")]
+    #[command(about = "Run and inspect the harness daemon")]
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
+
     /// Manage gateways for external platform integrations (e.g., Telegram)
     #[command(
         about = "Manage gateways for external platform integrations",
@@ -1437,6 +1795,10 @@ fn get_command_name(command: &Option<Command>) -> &'static str {
         Some(Command::Gateway { .. }) => "gateway",
         #[cfg(feature = "scheduler")]
         Some(Command::Schedule { .. }) => "schedule",
+        #[cfg(feature = "harness")]
+        Some(Command::Harness { .. }) => "harness",
+        #[cfg(feature = "harness")]
+        Some(Command::Daemon { .. }) => "daemon",
         #[cfg(feature = "update")]
         Some(Command::Update { .. }) => "update",
         Some(Command::Recipe { .. }) => "recipe",
@@ -1962,6 +2324,667 @@ async fn handle_serve_command(args: ServeCommandArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Handle `warmachine harness ...` (harness builds only).
+#[cfg(feature = "harness")]
+async fn handle_harness_command(command: HarnessCommand) -> Result<()> {
+    use std::str::FromStr;
+    use warmachine::harness::{MemoryKind, MemoryStore, NewRecord, RecordStatus};
+
+    fn load_harness_config() -> Result<(warmachine::harness::HarnessConfig, std::path::PathBuf)> {
+        let path = warmachine::config::paths::Paths::in_config_dir("config.yaml");
+        let yaml = if path.exists() {
+            std::fs::read_to_string(&path)?
+        } else {
+            String::new()
+        };
+        let config = warmachine::harness::config::parse_harness_config(&yaml)
+            .map_err(|e| anyhow::anyhow!("invalid harness config in {}: {e}", path.display()))?;
+        Ok((config, path))
+    }
+
+    async fn open_memory() -> Result<(MemoryStore, warmachine::harness::HarnessConfig)> {
+        let (config, _) = load_harness_config()?;
+        if !config.memory.enabled {
+            anyhow::bail!("harness memory is disabled (harness.memory.enabled = false)");
+        }
+        let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+        let store = MemoryStore::open(&db_path).await?;
+        Ok((store, config))
+    }
+
+    fn print_record(record: &warmachine::harness::MemoryRecord) {
+        match &record.subject {
+            Some(subject) => println!(
+                "{} [{}] {} — {} ({}, {})\n  {}",
+                record.id,
+                record.kind.as_str(),
+                subject,
+                record.content,
+                record.status.as_str(),
+                record.source,
+                record.created_at.format("%Y-%m-%d %H:%M UTC")
+            ),
+            None => println!(
+                "{} [{}] {} ({}, {})\n  {}",
+                record.id,
+                record.kind.as_str(),
+                record.content,
+                record.status.as_str(),
+                record.source,
+                record.created_at.format("%Y-%m-%d %H:%M UTC")
+            ),
+        }
+    }
+
+    match command {
+        HarnessCommand::Config => {
+            let (config, path) = load_harness_config()?;
+            println!("# effective harness config ({})", path.display());
+            print!("{}", serde_yaml::to_string(&config)?);
+            Ok(())
+        }
+        HarnessCommand::Consolidate { path } => {
+            let (store, _config) = open_memory().await?;
+            let transcript = std::fs::read_to_string(&path)?;
+            let report =
+                warmachine::harness::consolidate(&store, &transcript, "consolidation:cli").await?;
+            store.close().await;
+            println!(
+                "stored {} candidate(s); rejected {}",
+                report.stored.len(),
+                report.rejected.len()
+            );
+            for record in &report.stored {
+                print_record(record);
+            }
+            for reason in &report.rejected {
+                println!("rejected: {reason}");
+            }
+            Ok(())
+        }
+        HarnessCommand::Memory { command } => {
+            let (store, config) = open_memory().await?;
+            let result = async {
+                match command {
+                    MemoryCommand::Add {
+                        kind,
+                        subject,
+                        content,
+                    } => {
+                        let record = store
+                            .write(
+                                NewRecord {
+                                    kind: MemoryKind::from_str(&kind)?,
+                                    subject,
+                                    content: content.join(" "),
+                                    source: "cli".to_string(),
+                                },
+                                false,
+                            )
+                            .await?;
+                        print_record(&record);
+                        Ok(())
+                    }
+                    MemoryCommand::List { status, kind } => {
+                        let status = match status.as_deref() {
+                            None | Some("all") => None,
+                            Some(other) => Some(RecordStatus::from_str(other)?),
+                        };
+                        let kind = match kind.as_deref() {
+                            None => None,
+                            Some(other) => Some(MemoryKind::from_str(other)?),
+                        };
+                        let records = store.list(status, kind).await?;
+                        if records.is_empty() {
+                            println!("(no records)");
+                        }
+                        for record in &records {
+                            print_record(record);
+                        }
+                        Ok(())
+                    }
+                    MemoryCommand::Search { query } => {
+                        let records = store.search(&query.join(" ")).await?;
+                        if records.is_empty() {
+                            println!("(no matches)");
+                        }
+                        for record in &records {
+                            print_record(record);
+                        }
+                        Ok(())
+                    }
+                    MemoryCommand::Show { id } => match store.get(&id).await? {
+                        Some(record) => {
+                            print_record(&record);
+                            if let Some(old) = &record.supersedes {
+                                println!("  supersedes: {old}");
+                            }
+                            Ok(())
+                        }
+                        None => anyhow::bail!("no memory record {id}"),
+                    },
+                    MemoryCommand::Correct { id, content } => {
+                        let record = store.correct(&id, &content.join(" "), "cli").await?;
+                        print_record(&record);
+                        Ok(())
+                    }
+                    MemoryCommand::Delete { id } => {
+                        if store.delete(&id).await? {
+                            println!("deleted {id}");
+                            Ok(())
+                        } else {
+                            anyhow::bail!("no memory record {id}")
+                        }
+                    }
+                    MemoryCommand::Approve { id } => {
+                        let record = store.approve(&id).await?;
+                        print_record(&record);
+                        Ok(())
+                    }
+                    MemoryCommand::Brief => {
+                        let brief = store
+                            .build_brief(config.memory.brief_max_tokens as usize)
+                            .await?;
+                        if brief.is_empty() {
+                            println!("(memory is empty)");
+                        } else {
+                            println!("{brief}");
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            store.close().await;
+            result
+        }
+        HarnessCommand::Tasks { command } => {
+            use warmachine::harness::{FileDeliveryChannel, NewTask, TaskStatus, TaskStore};
+
+            fn parse_deadline(text: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+                if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(text) {
+                    return Ok(parsed.with_timezone(&chrono::Utc));
+                }
+                let date = chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+                    .map_err(|_| anyhow::anyhow!("deadline must be RFC 3339 or YYYY-MM-DD"))?;
+                let end_of_day = date
+                    .and_hms_opt(23, 59, 59)
+                    .ok_or_else(|| anyhow::anyhow!("invalid deadline date"))?;
+                Ok(chrono::DateTime::from_naive_utc_and_offset(
+                    end_of_day,
+                    chrono::Utc,
+                ))
+            }
+
+            fn print_task(task: &warmachine::harness::Task) {
+                let mut line = format!(
+                    "{} [{}] {} — owner {}",
+                    task.id,
+                    task.status.as_str(),
+                    task.title,
+                    task.owner
+                );
+                if let Some(deadline) = &task.deadline {
+                    line.push_str(&format!(", due {}", deadline.format("%Y-%m-%d")));
+                }
+                if let Some(next) = &task.next_step {
+                    line.push_str(&format!(", next: {next}"));
+                }
+                println!("{line}");
+                if let Some(result) = &task.result {
+                    println!("  result: {result}");
+                }
+            }
+
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let store = TaskStore::open(&db_path).await?;
+            let result = async {
+                match command {
+                    TasksCommand::Add {
+                        owner,
+                        next_step,
+                        deadline,
+                        title,
+                    } => {
+                        let task = store
+                            .create(
+                                NewTask {
+                                    title: title.join(" "),
+                                    owner,
+                                    next_step,
+                                    deadline: deadline
+                                        .as_deref()
+                                        .map(parse_deadline)
+                                        .transpose()?,
+                                },
+                                "cli",
+                            )
+                            .await?;
+                        print_task(&task);
+                        Ok(())
+                    }
+                    TasksCommand::List {
+                        status,
+                        owner,
+                        overdue,
+                    } => {
+                        let status = match status.as_deref() {
+                            None => None,
+                            Some(other) => Some(TaskStatus::from_str(other)?),
+                        };
+                        let tasks = store.list(status, owner.as_deref(), overdue).await?;
+                        if tasks.is_empty() {
+                            println!("(no tasks)");
+                        }
+                        for task in &tasks {
+                            print_task(task);
+                        }
+                        Ok(())
+                    }
+                    TasksCommand::Show { id } => {
+                        let task = store
+                            .get(&id)
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("no task {id}"))?;
+                        print_task(&task);
+                        for event in store.history(&id).await? {
+                            match &event.detail {
+                                Some(detail) => println!(
+                                    "  {} {} by {} — {}",
+                                    event.at.format("%Y-%m-%d %H:%M UTC"),
+                                    event.event,
+                                    event.actor,
+                                    detail
+                                ),
+                                None => println!(
+                                    "  {} {} by {}",
+                                    event.at.format("%Y-%m-%d %H:%M UTC"),
+                                    event.event,
+                                    event.actor
+                                ),
+                            }
+                        }
+                        Ok(())
+                    }
+                    TasksCommand::Start { id } => {
+                        print_task(&store.start(&id, "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Complete { id, result } => {
+                        print_task(&store.complete(&id, &result.join(" "), "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Fail { id, reason } => {
+                        print_task(&store.fail(&id, &reason.join(" "), "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Cancel { id } => {
+                        print_task(&store.cancel(&id, "cli").await?);
+                        Ok(())
+                    }
+                    TasksCommand::Note { id, note } => {
+                        store.add_note(&id, &note.join(" "), "cli").await?;
+                        println!("noted on {id}");
+                        Ok(())
+                    }
+                    TasksCommand::Deliver { out } => {
+                        let path = out.unwrap_or_else(|| {
+                            warmachine::config::paths::Paths::in_config_dir("deliveries.md")
+                        });
+                        let channel = FileDeliveryChannel { path: path.clone() };
+                        let report = store.deliver_pending(&channel, "cli").await?;
+                        println!(
+                            "delivered {} task(s) to {}; {} failed",
+                            report.delivered.len(),
+                            path.display(),
+                            report.failed.len()
+                        );
+                        for (id, error) in &report.failed {
+                            println!("  delivery failed for {id}: {error}");
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            store.close().await;
+            result
+        }
+        HarnessCommand::Approvals { command } => {
+            use warmachine::harness::{ApprovalStatus, ApprovalStore};
+
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let audit_path = warmachine::config::paths::Paths::in_config_dir("audit.log");
+            let store = ApprovalStore::open(&db_path).await?;
+
+            fn print_request(request: &warmachine::harness::ApprovalRequest) {
+                println!(
+                    "{} [{}] {} (class {}, from {})",
+                    request.id,
+                    request.status.as_str(),
+                    request.action,
+                    request.action_class,
+                    request.origin
+                );
+                println!("  args: {}", request.args_json);
+                println!(
+                    "  created {}, expires {}",
+                    request.created_at.format("%Y-%m-%d %H:%M UTC"),
+                    request.expires_at.format("%Y-%m-%d %H:%M UTC")
+                );
+                if let Some(by) = &request.decided_by {
+                    println!(
+                        "  decided by {by}{}",
+                        request
+                            .note
+                            .as_ref()
+                            .map(|n| format!(" — {n}"))
+                            .unwrap_or_default()
+                    );
+                }
+            }
+
+            let result = async {
+                match command {
+                    ApprovalsCommand::List { status } => {
+                        let status = match status.as_deref() {
+                            None => None,
+                            Some(other) => Some(ApprovalStatus::from_str(other)?),
+                        };
+                        let requests = store.list(status).await?;
+                        if requests.is_empty() {
+                            println!("(no approval requests)");
+                        }
+                        for request in &requests {
+                            print_request(request);
+                        }
+                        Ok(())
+                    }
+                    ApprovalsCommand::Show { id } => {
+                        let request = store
+                            .get(&id)
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("no approval request {id}"))?;
+                        print_request(&request);
+                        Ok(())
+                    }
+                    ApprovalsCommand::Approve { id, note } => {
+                        let request = store.decide(&id, true, "cli", note.as_deref()).await?;
+                        print_request(&request);
+                        let _ = warmachine::harness::audit::append(
+                            &audit_path,
+                            "approval_decided",
+                            "",
+                            serde_json::json!({"approval_id": id, "decision": "approved", "by": "cli"}),
+                        );
+                        Ok(())
+                    }
+                    ApprovalsCommand::Deny { id, note } => {
+                        let request = store.decide(&id, false, "cli", note.as_deref()).await?;
+                        print_request(&request);
+                        let _ = warmachine::harness::audit::append(
+                            &audit_path,
+                            "approval_decided",
+                            "",
+                            serde_json::json!({"approval_id": id, "decision": "denied", "by": "cli"}),
+                        );
+                        Ok(())
+                    }
+                    ApprovalsCommand::Request {
+                        action,
+                        origin,
+                        args,
+                        expiry_minutes,
+                    } => {
+                        // Validate the args are JSON before queueing.
+                        let _: serde_json::Value = serde_json::from_str(&args)
+                            .map_err(|e| anyhow::anyhow!("--args must be valid JSON: {e}"))?;
+                        let (config, _) = load_harness_config()?;
+                        let ttl =
+                            expiry_minutes.unwrap_or(config.approvals.default_expiry_minutes);
+                        let request = store
+                            .create(&action, "approval_required", &origin, &args, ttl)
+                            .await?;
+                        let _ = warmachine::harness::audit::append(
+                            &audit_path,
+                            "approval_requested",
+                            "",
+                            serde_json::json!({"approval_id": request.id, "action": action, "origin": origin}),
+                        );
+                        print_request(&request);
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            store.close().await;
+            result
+        }
+        HarnessCommand::Audit { command } => {
+            let audit_path = warmachine::config::paths::Paths::in_config_dir("audit.log");
+            match command {
+                HarnessAuditCommand::Verify => {
+                    let report = warmachine::harness::audit::verify(&audit_path)?;
+                    println!(
+                        "audit chain OK: {} entries verified, {} non-monotonic timestamps",
+                        report.entries, report.non_monotonic_timestamps
+                    );
+                    Ok(())
+                }
+                HarnessAuditCommand::List { limit } => {
+                    let entries = warmachine::harness::audit::tail(&audit_path, limit)?;
+                    if entries.is_empty() {
+                        println!("(audit log is empty)");
+                    }
+                    for entry in &entries {
+                        println!(
+                            "{} {} session={} {}",
+                            entry.get("ts").and_then(|v| v.as_str()).unwrap_or("?"),
+                            entry.get("event").and_then(|v| v.as_str()).unwrap_or("?"),
+                            entry
+                                .get("session_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(""),
+                            entry
+                                .get("details")
+                                .map(|d| d.to_string())
+                                .unwrap_or_default()
+                        );
+                    }
+                    Ok(())
+                }
+            }
+        }
+        HarnessCommand::Connectors { command } => {
+            use warmachine::harness::connectors;
+            use warmachine::harness::{KeyringVault, Vault, VaultIndex};
+
+            let (config, _) = load_harness_config()?;
+            let vault = KeyringVault;
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let index = VaultIndex::open(&db_path).await?;
+
+            fn read_secret(prompt: &str) -> Result<String> {
+                use std::io::IsTerminal;
+                if std::io::stdin().is_terminal() {
+                    Ok(rpassword::prompt_password(prompt)?)
+                } else {
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line)?;
+                    Ok(line.trim_end_matches(['\n', '\r']).to_string())
+                }
+            }
+
+            let result = async {
+                match command {
+                    ConnectorsCommand::List => {
+                        if config.connectors.is_empty() {
+                            println!("(no connectors configured — add harness.connectors entries to config.yaml)");
+                        }
+                        for def in &config.connectors {
+                            let status = connectors::assess(def, &vault)?;
+                            println!(
+                                "{} — {}",
+                                status.name,
+                                if status.configured {
+                                    "configured (secrets present)".to_string()
+                                } else {
+                                    status.detail.clone()
+                                }
+                            );
+                        }
+                        Ok(())
+                    }
+                    ConnectorsCommand::Status { check } => {
+                        for def in &config.connectors {
+                            let mut status = connectors::assess(def, &vault)?;
+                            if check && status.configured {
+                                match connectors::health_check(def, &vault).await {
+                                    Ok(detail) => {
+                                        status.healthy = Some(true);
+                                        status.detail = detail;
+                                    }
+                                    Err(e) => {
+                                        status.healthy = Some(false);
+                                        status.detail = format!("health check failed: {e}");
+                                    }
+                                }
+                            }
+                            println!(
+                                "{}: configured={}, healthy={} — {}",
+                                status.name,
+                                status.configured,
+                                status
+                                    .healthy
+                                    .map(|h| h.to_string())
+                                    .unwrap_or_else(|| "not checked".to_string()),
+                                status.detail
+                            );
+                        }
+                        Ok(())
+                    }
+                    ConnectorsCommand::Connect { name } => {
+                        let def = config
+                            .connectors
+                            .iter()
+                            .find(|d| d.name == name)
+                            .ok_or_else(|| anyhow::anyhow!("no connector '{name}' in config"))?;
+                        for secret in &def.env_secrets {
+                            if vault.get(&secret.account)?.is_none() {
+                                let value = read_secret(&format!(
+                                    "Value for {} (vault account '{}'): ",
+                                    secret.env, secret.account
+                                ))?;
+                                if value.is_empty() {
+                                    anyhow::bail!("empty value for {}; aborting connect", secret.env);
+                                }
+                                vault.set(&secret.account, &value)?;
+                                index.record_set(&secret.account).await?;
+                                println!("stored {} in the vault", secret.env);
+                            }
+                        }
+                        match connectors::health_check(def, &vault).await {
+                            Ok(detail) => println!("connected: {name} — {detail}"),
+                            Err(e) => println!("configured, but health check failed: {e}"),
+                        }
+                        let _ = warmachine::harness::audit::append(
+                            &warmachine::config::paths::Paths::in_config_dir("audit.log"),
+                            "connector_connected",
+                            "",
+                            serde_json::json!({"connector": name}),
+                        );
+                        Ok(())
+                    }
+                    ConnectorsCommand::Disconnect { name } => {
+                        let def = config
+                            .connectors
+                            .iter()
+                            .find(|d| d.name == name)
+                            .ok_or_else(|| anyhow::anyhow!("no connector '{name}' in config"))?;
+                        for secret in &def.env_secrets {
+                            if vault.delete(&secret.account)? {
+                                println!("removed vault secret '{}'", secret.account);
+                            }
+                            index.record_delete(&secret.account).await?;
+                        }
+                        println!("disconnected: {name}");
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            index.close().await;
+            result
+        }
+        HarnessCommand::Vault { command } => {
+            use warmachine::harness::{KeyringVault, Vault, VaultIndex};
+
+            let vault = KeyringVault;
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let index = VaultIndex::open(&db_path).await?;
+            let result = async {
+                match command {
+                    VaultCommand::Set { account } => {
+                        use std::io::IsTerminal;
+                        let value = if std::io::stdin().is_terminal() {
+                            rpassword::prompt_password(format!("Secret for '{account}': "))?
+                        } else {
+                            let mut line = String::new();
+                            std::io::stdin().read_line(&mut line)?;
+                            line.trim_end_matches(['\n', '\r']).to_string()
+                        };
+                        if value.is_empty() {
+                            anyhow::bail!("empty secret; nothing stored");
+                        }
+                        vault.set(&account, &value)?;
+                        index.record_set(&account).await?;
+                        println!("stored '{account}' in the vault ({})", vault.backend());
+                        Ok(())
+                    }
+                    VaultCommand::Delete { account } => {
+                        let removed = vault.delete(&account)?;
+                        index.record_delete(&account).await?;
+                        println!(
+                            "{}",
+                            if removed {
+                                format!("deleted '{account}'")
+                            } else {
+                                format!("no secret '{account}' in the vault")
+                            }
+                        );
+                        Ok(())
+                    }
+                    VaultCommand::Has { account } => {
+                        println!(
+                            "{}: {}",
+                            account,
+                            if vault.get(&account)?.is_some() {
+                                "present"
+                            } else {
+                                "absent"
+                            }
+                        );
+                        Ok(())
+                    }
+                    VaultCommand::List => {
+                        let accounts = index.list().await?;
+                        if accounts.is_empty() {
+                            println!("(vault index is empty)");
+                        }
+                        for account in &accounts {
+                            println!("{account}");
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            index.close().await;
+            result
+        }
+    }
 }
 
 /// Handle `warmachine audit ...` (on-prem builds only).
@@ -2986,6 +4009,10 @@ pub async fn cli() -> anyhow::Result<()> {
         Some(Command::Gateway { command }) => handle_gateway_command(command).await,
         #[cfg(feature = "scheduler")]
         Some(Command::Schedule { command }) => handle_schedule_command(command).await,
+        #[cfg(feature = "harness")]
+        Some(Command::Harness { command }) => handle_harness_command(command).await,
+        #[cfg(feature = "harness")]
+        Some(Command::Daemon { command }) => handle_daemon_command(command).await,
         #[cfg(feature = "update")]
         Some(Command::Update {
             canary,

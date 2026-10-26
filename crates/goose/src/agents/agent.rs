@@ -292,6 +292,8 @@ pub struct Agent {
     pub(super) tool_inspection_manager: ToolInspectionManager,
     pub(super) hook_manager: crate::hooks::HookManager,
     session_start_emitted: AtomicBool,
+    #[cfg(all(feature = "harness", not(feature = "onprem")))]
+    harness_brief_injected: AtomicBool,
     #[cfg(test)]
     pub(super) stop_hook_block_cap_override: Option<u32>,
     container: Mutex<Option<Container>>,
@@ -462,6 +464,8 @@ impl Agent {
                 )
             },
             session_start_emitted: AtomicBool::new(false),
+            #[cfg(all(feature = "harness", not(feature = "onprem")))]
+            harness_brief_injected: AtomicBool::new(false),
             #[cfg(test)]
             stop_hook_block_cap_override: None,
             container: Mutex::new(None),
@@ -1807,6 +1811,9 @@ impl Agent {
             .add_message(&session_config.id, &user_message)
             .await?;
 
+        #[cfg(all(feature = "harness", not(feature = "onprem")))]
+        self.ensure_harness_memory_brief().await;
+
         if !self.config.disable_session_naming {
             let provider = self
                 .provider
@@ -2174,6 +2181,11 @@ impl Agent {
                 .add_message(&session_config.id, &user_message)
                 .await?;
             return Ok(Box::pin(futures::stream::empty()));
+        }
+
+        #[cfg(all(feature = "harness", not(feature = "onprem")))]
+        if is_first_agent_turn {
+            self.ensure_harness_memory_brief().await;
         }
 
         if is_first_agent_turn && !self.session_start_emitted.swap(true, Ordering::AcqRel) {
@@ -3575,6 +3587,42 @@ impl Agent {
             }
         }.instrument(reply_stream_span));
         Ok(inner)
+    }
+
+    /// Harness (AC-1.2): load the long-term memory brief into the
+    /// system prompt exactly once per agent (i.e. per session), before
+    /// the first prompt is built. Called from both reply engines so
+    /// behavior is identical with or without the state machine. Memory
+    /// is best-effort: any failure leaves the session unbriefed rather
+    /// than broken.
+    #[cfg(all(feature = "harness", not(feature = "onprem")))]
+    pub(crate) async fn ensure_harness_memory_brief(&self) {
+        use std::sync::atomic::Ordering;
+        if self.harness_brief_injected.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let config_path = crate::config::paths::Paths::in_config_dir("config.yaml");
+        let yaml = std::fs::read_to_string(&config_path).unwrap_or_default();
+        let Ok(config) = crate::harness::config::parse_harness_config(&yaml) else {
+            return;
+        };
+        if !config.memory.enabled {
+            return;
+        }
+        let db_path = crate::config::paths::Paths::in_config_dir("harness.db");
+        let Ok(store) = crate::harness::MemoryStore::open(&db_path).await else {
+            return;
+        };
+        if let Ok(brief) = store
+            .build_brief(config.memory.brief_max_tokens as usize)
+            .await
+        {
+            if !brief.is_empty() {
+                self.extend_system_prompt("harness_memory".to_string(), brief)
+                    .await;
+            }
+        }
+        store.close().await;
     }
 
     pub async fn extend_system_prompt(&self, key: String, instruction: String) {

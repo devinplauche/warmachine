@@ -6,6 +6,8 @@ pub mod extension_malware_check;
 pub mod extension_manager;
 pub mod final_output_tool;
 pub(crate) mod gen_ai_telemetry;
+#[cfg(all(feature = "harness", not(feature = "onprem")))]
+pub mod harness_gate;
 mod large_response_handler;
 pub mod mcp_client;
 pub mod moim;

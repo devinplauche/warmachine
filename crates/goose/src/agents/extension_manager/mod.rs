@@ -1323,6 +1323,24 @@ impl ExtensionManager {
         cancellation_token: CancellationToken,
     ) -> std::result::Result<ToolCallResult, ErrorData> {
         let tool_name_str = tool_call.name.to_string();
+        // Harness gate (AC-4.3): background sessions are classified
+        // against the action classes before anything resolves or
+        // executes. No-ops for interactive sessions.
+        #[cfg(all(feature = "harness", not(feature = "onprem")))]
+        {
+            let arguments_json =
+                serde_json::to_string(&tool_call.arguments).unwrap_or_else(|_| "{}".to_string());
+            if let Err(message) = crate::agents::harness_gate::check(
+                &ctx.session_id,
+                &tool_name_str,
+                &arguments_json,
+                &cancellation_token,
+            )
+            .await
+            {
+                return Err(ErrorData::new(ErrorCode::INTERNAL_ERROR, message, None));
+            }
+        }
         let resolved = self
             .resolve_tool_with_constraints(
                 &ctx.session_id,

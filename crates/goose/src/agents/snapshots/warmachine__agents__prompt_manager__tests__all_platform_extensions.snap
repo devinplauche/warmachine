@@ -114,6 +114,18 @@ Use write and edit to efficiently make changes. Test and verify as appropriate.
 
 When running Python scripts or commands, always use `python3` instead of `python`.
 
+## harness_memory
+
+### Instructions
+Long-term memory persists across sessions. A brief of the
+current memory is already in your system prompt; use
+memory_write to store durable facts, preferences, people,
+and standing decisions the user will expect you to know
+next time. Give updatable facts a subject so a later write
+supersedes the old value. Never store credentials or
+secrets — the store refuses them. Do not store transient
+conversation detail.
+
 ## orchestrator
 
 ### Instructions
@@ -135,6 +147,18 @@ You have these skills at your disposal, when it is clear they can help you solve
 
 ## summon
 
+
+## tasks
+
+### Instructions
+The task ledger is durable across sessions and restarts.
+Create a task for any work that should outlive this
+session or be handed off: background jobs, follow-ups,
+scheduled work. Complete tasks with their result when
+the outcome is known; the result is delivered to the
+user exactly once. If work fails, mark it failed with
+the reason — a failed task stays open and visible, it
+never silently closes.
 
 ## todo
 

@@ -13,11 +13,15 @@ pub mod chatrecall;
 pub mod code_execution;
 pub mod developer;
 pub mod ext_manager;
+#[cfg(all(feature = "harness", not(feature = "onprem")))]
+pub mod memory;
 pub mod orchestrator;
 #[cfg(feature = "scheduler")]
 pub mod scheduler;
 pub mod summarize;
 pub mod summon;
+#[cfg(all(feature = "harness", not(feature = "onprem")))]
+pub mod tasks;
 pub mod todo;
 pub mod tom;
 
@@ -65,6 +69,35 @@ pub static PLATFORM_EXTENSIONS: Lazy<HashMap<&'static str, PlatformExtensionDef>
                 unprefixed_tools: false,
                 hidden: false,
                 client_factory: |ctx| Some(Box::new(todo::TodoClient::new(ctx).unwrap())),
+            },
+        );
+
+        #[cfg(all(feature = "harness", not(feature = "onprem")))]
+        map.insert(
+            tasks::EXTENSION_NAME,
+            PlatformExtensionDef {
+                name: tasks::EXTENSION_NAME,
+                display_name: "Tasks",
+                description: "Durable task ledger across sessions (harness principal layer)",
+                default_enabled: true,
+                unprefixed_tools: false,
+                hidden: false,
+                client_factory: |ctx| Some(Box::new(tasks::TasksClient::new(ctx).unwrap())),
+            },
+        );
+
+        #[cfg(all(feature = "harness", not(feature = "onprem")))]
+        map.insert(
+            memory::EXTENSION_NAME,
+            PlatformExtensionDef {
+                name: memory::EXTENSION_NAME,
+                display_name: "Memory",
+                description:
+                    "Persistent long-term memory across sessions (harness principal layer)",
+                default_enabled: true,
+                unprefixed_tools: false,
+                hidden: false,
+                client_factory: |ctx| Some(Box::new(memory::MemoryClient::new(ctx).unwrap())),
             },
         );
 
