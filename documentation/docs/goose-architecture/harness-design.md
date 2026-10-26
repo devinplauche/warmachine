@@ -289,3 +289,27 @@ handshake. OAuth-based services (Gmail) still need their
 interactive consent in a browser — the flow covers token/API-key
 connectors end-to-end; S6 (inbox drafting) goes live once a Gmail
 connector is connected on the user's machine.
+
+## Addendum — proof pass (2026-10-26)
+
+Independent verification (draft PR #33 for real CI, plus
+`scripts/harness-verify.sh`) found two integration defects the
+phase-level tests had missed:
+
+- The memory platform extension was named `memory`, which collides
+  with the builtin goose-mcp memory server: the config defaults map
+  is built from platform extension definitions and is searched
+  before available builtins, so the platform extension shadowed the
+  builtin in `get_extension_by_name`. Renamed to `harness_memory`
+  (display name stays "Memory"; the tools are unchanged).
+- `test_all_platform_extensions` snapshots every platform
+  extension's instructions, so the snapshot now includes the harness
+  extensions, and the CI TLS-matrix feature sets include `harness`
+  (the matrix convention is that its feature list covers every
+  feature that adds a platform extension, keeping one snapshot valid
+  in both builds).
+
+The same pass found that the scheduler's `execute_job` swallows
+agent-stream errors and returns `Ok(session)`, so the daemon
+reported failed runs (dead provider, model OOM) as finished. The
+daemon now treats a run that consumed zero tokens as failed.

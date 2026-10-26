@@ -15,7 +15,12 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tokio_util::sync::CancellationToken;
 
-pub static EXTENSION_NAME: &str = "memory";
+// Not "memory": goose-mcp already ships a builtin MCP server under
+// that name, and the config defaults map (built from platform
+// extension definitions) is searched before available builtins, so
+// a platform extension called "memory" shadows the builtin in
+// get_extension_by_name.
+pub static EXTENSION_NAME: &str = "harness_memory";
 pub const MEMORY_WRITE_TOOL_NAME: &str = "memory_write";
 pub const MEMORY_SEARCH_TOOL_NAME: &str = "memory_search";
 pub const MEMORY_BRIEF_TOOL_NAME: &str = "memory_brief";
