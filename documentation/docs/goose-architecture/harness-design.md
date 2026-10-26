@@ -262,3 +262,30 @@ first (default `deliveries.md`, override
 (default `alerts.md`, override `alert_fallback_path`). Attempts are
 audit events: `alert_delivered`, `alert_primary_failed`,
 `alert_fallback_used`.
+
+## Phase 5 addendum — connectors & vault
+
+Secrets live in the OS keychain (service `warmachine-harness`,
+account = the secret's name), full stop. The harness vault never
+falls back to plaintext file storage — where goose's provider
+config degrades to a secrets file when the keychain is missing,
+the vault errors instead, because a silent plaintext fallback
+would void AC-5.1. The keychain cannot be enumerated, so a
+metadata-only index in harness.db (account names and timestamps,
+never values) backs `vault list`.
+
+Connector definitions in config are references: transport
+(command/args or URL) plus `env_secrets` mappings of environment
+variable → vault account. There is no field a secret value could
+be serialized into. Health is a real MCP `initialize` handshake
+with the vault values injected as environment; for HTTP
+connectors, an `AUTHORIZATION` env mapping is sent as the
+Authorization header. Status therefore means "the server accepted
+the credential", not "a process started".
+
+The connect flow (`harness connectors connect <name>`) prompts
+without echo for each missing secret, stores it, then runs the
+handshake. OAuth-based services (Gmail) still need their
+interactive consent in a browser — the flow covers token/API-key
+connectors end-to-end; S6 (inbox drafting) goes live once a Gmail
+connector is connected on the user's machine.

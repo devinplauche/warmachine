@@ -11,17 +11,20 @@
 pub mod approvals;
 pub mod audit;
 pub mod config;
+pub mod connectors;
 pub mod daemon;
 pub mod ledger;
 pub mod memory;
 pub mod policy;
+pub mod vault;
 
 pub use approvals::{ApprovalRequest, ApprovalStatus, ApprovalStore};
 pub use audit::VerifyReport as AuditVerifyReport;
 pub use config::{
-    ActionClass, ActionClasses, ApprovalsConfig, DaemonConfig, DeliveryConfig, HarnessConfig,
-    MemoryConfig, WebhookTrigger,
+    ActionClass, ActionClasses, ApprovalsConfig, ConnectorDef, DaemonConfig, DeliveryConfig,
+    EnvSecret, HarnessConfig, MemoryConfig, WebhookTrigger,
 };
+pub use connectors::ConnectorStatus;
 pub use daemon::{TriggerGuard, TriggerPermit};
 pub use ledger::{
     DeliverOutcome, DeliveryChannel, DeliveryReport, FileDeliveryChannel, NewTask, Task, TaskEvent,
@@ -32,3 +35,4 @@ pub use memory::{
     NewRecord, RecordStatus, WritePolicy,
 };
 pub use policy::{Decision, DeliveryLog, DeliveryPolicy, DenyReason};
+pub use vault::{KeyringVault, MemoryVault, Vault, VaultIndex};

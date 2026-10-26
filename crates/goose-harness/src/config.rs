@@ -25,6 +25,36 @@ pub struct HarnessConfig {
     pub memory: MemoryConfig,
     pub daemon: DaemonConfig,
     pub approvals: ApprovalsConfig,
+    #[serde(default)]
+    pub connectors: Vec<ConnectorDef>,
+}
+
+/// One managed connector (AC-5): an MCP server the harness knows
+/// how to health-check, plus the vault accounts whose values are
+/// injected as environment variables when it is spawned. The
+/// definition never contains a secret value — only account names.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectorDef {
+    pub name: String,
+    pub description: Option<String>,
+    /// stdio transport: the server command.
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// streamable-HTTP transport: the server URL (instead of command).
+    pub url: Option<String>,
+    #[serde(default)]
+    pub env_secrets: Vec<EnvSecret>,
+}
+
+/// One secret to inject: the vault `account`'s value is passed to
+/// the connector process as environment variable `env`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnvSecret {
+    pub env: String,
+    pub account: String,
 }
 
 /// Async approval queue settings (AC-4).

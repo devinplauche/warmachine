@@ -17,6 +17,8 @@ activities:
   - type: text
     content: "Test harness approvals and audit (queue an approval request with `warmachine harness approvals request`, approve it from a second terminal, confirm `warmachine harness audit verify` passes)"
   - Test delegate tool for task delegation (sync and async)
+  - type: text
+    content: "Test harness connectors and vault (run `warmachine harness connectors list`, connect the demo connector with `warmachine harness connectors connect`, and confirm `warmachine harness connectors status --check` reports healthy)"
   - Test multi-turn thinking preservation for providers that reject replayed reasoning_content
   - Test Z.AI Coding Plan streamed tool calls and interruption recovery
   - Validate ACP thinking-effort discovery, forwarding, and provider switching

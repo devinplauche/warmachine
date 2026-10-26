@@ -659,6 +659,71 @@ enum HarnessCommand {
         #[command(subcommand)]
         command: HarnessAuditCommand,
     },
+    /// Manage connectors and their connection state
+    #[command(about = "Manage connectors and their connection state")]
+    Connectors {
+        #[command(subcommand)]
+        command: ConnectorsCommand,
+    },
+    /// Manage secrets in the OS-keychain vault (values are never printed)
+    #[command(about = "Manage vault secrets (values are never printed)")]
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum ConnectorsCommand {
+    /// List configured connectors and whether their secrets are present
+    #[command(about = "List configured connectors")]
+    List,
+    /// Show connector status; --check also runs the MCP health handshake
+    #[command(about = "Show connector status")]
+    Status {
+        /// Run a live health check (MCP initialize) for configured connectors
+        #[arg(long)]
+        check: bool,
+    },
+    /// Guided connect: store the connector's secrets in the vault, then health-check
+    #[command(about = "Guided connect flow for one connector")]
+    Connect {
+        /// Connector name from config
+        name: String,
+    },
+    /// Remove the connector's secrets from the vault
+    #[command(about = "Disconnect a connector (removes its vault secrets)")]
+    Disconnect {
+        /// Connector name from config
+        name: String,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum VaultCommand {
+    /// Store a secret (prompted without echo, or read from stdin when piped)
+    #[command(about = "Store a secret in the vault")]
+    Set {
+        /// Vault account name
+        account: String,
+    },
+    /// Delete a secret from the vault
+    #[command(about = "Delete a secret from the vault")]
+    Delete {
+        /// Vault account name
+        account: String,
+    },
+    /// Check whether a secret exists (never prints the value)
+    #[command(about = "Check whether a secret exists")]
+    Has {
+        /// Vault account name
+        account: String,
+    },
+    /// List known vault accounts (names only, from the index)
+    #[command(about = "List known vault accounts")]
+    List,
 }
 
 #[cfg(feature = "harness")]
@@ -2731,6 +2796,193 @@ async fn handle_harness_command(command: HarnessCommand) -> Result<()> {
                     Ok(())
                 }
             }
+        }
+        HarnessCommand::Connectors { command } => {
+            use warmachine::harness::connectors;
+            use warmachine::harness::{KeyringVault, Vault, VaultIndex};
+
+            let (config, _) = load_harness_config()?;
+            let vault = KeyringVault;
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let index = VaultIndex::open(&db_path).await?;
+
+            fn read_secret(prompt: &str) -> Result<String> {
+                use std::io::IsTerminal;
+                if std::io::stdin().is_terminal() {
+                    Ok(rpassword::prompt_password(prompt)?)
+                } else {
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line)?;
+                    Ok(line.trim_end_matches(['\n', '\r']).to_string())
+                }
+            }
+
+            let result = async {
+                match command {
+                    ConnectorsCommand::List => {
+                        if config.connectors.is_empty() {
+                            println!("(no connectors configured — add harness.connectors entries to config.yaml)");
+                        }
+                        for def in &config.connectors {
+                            let status = connectors::assess(def, &vault)?;
+                            println!(
+                                "{} — {}",
+                                status.name,
+                                if status.configured {
+                                    "configured (secrets present)".to_string()
+                                } else {
+                                    status.detail.clone()
+                                }
+                            );
+                        }
+                        Ok(())
+                    }
+                    ConnectorsCommand::Status { check } => {
+                        for def in &config.connectors {
+                            let mut status = connectors::assess(def, &vault)?;
+                            if check && status.configured {
+                                match connectors::health_check(def, &vault).await {
+                                    Ok(detail) => {
+                                        status.healthy = Some(true);
+                                        status.detail = detail;
+                                    }
+                                    Err(e) => {
+                                        status.healthy = Some(false);
+                                        status.detail = format!("health check failed: {e}");
+                                    }
+                                }
+                            }
+                            println!(
+                                "{}: configured={}, healthy={} — {}",
+                                status.name,
+                                status.configured,
+                                status
+                                    .healthy
+                                    .map(|h| h.to_string())
+                                    .unwrap_or_else(|| "not checked".to_string()),
+                                status.detail
+                            );
+                        }
+                        Ok(())
+                    }
+                    ConnectorsCommand::Connect { name } => {
+                        let def = config
+                            .connectors
+                            .iter()
+                            .find(|d| d.name == name)
+                            .ok_or_else(|| anyhow::anyhow!("no connector '{name}' in config"))?;
+                        for secret in &def.env_secrets {
+                            if vault.get(&secret.account)?.is_none() {
+                                let value = read_secret(&format!(
+                                    "Value for {} (vault account '{}'): ",
+                                    secret.env, secret.account
+                                ))?;
+                                if value.is_empty() {
+                                    anyhow::bail!("empty value for {}; aborting connect", secret.env);
+                                }
+                                vault.set(&secret.account, &value)?;
+                                index.record_set(&secret.account).await?;
+                                println!("stored {} in the vault", secret.env);
+                            }
+                        }
+                        match connectors::health_check(def, &vault).await {
+                            Ok(detail) => println!("connected: {name} — {detail}"),
+                            Err(e) => println!("configured, but health check failed: {e}"),
+                        }
+                        let _ = warmachine::harness::audit::append(
+                            &warmachine::config::paths::Paths::in_config_dir("audit.log"),
+                            "connector_connected",
+                            "",
+                            serde_json::json!({"connector": name}),
+                        );
+                        Ok(())
+                    }
+                    ConnectorsCommand::Disconnect { name } => {
+                        let def = config
+                            .connectors
+                            .iter()
+                            .find(|d| d.name == name)
+                            .ok_or_else(|| anyhow::anyhow!("no connector '{name}' in config"))?;
+                        for secret in &def.env_secrets {
+                            if vault.delete(&secret.account)? {
+                                println!("removed vault secret '{}'", secret.account);
+                            }
+                            index.record_delete(&secret.account).await?;
+                        }
+                        println!("disconnected: {name}");
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            index.close().await;
+            result
+        }
+        HarnessCommand::Vault { command } => {
+            use warmachine::harness::{KeyringVault, Vault, VaultIndex};
+
+            let vault = KeyringVault;
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let index = VaultIndex::open(&db_path).await?;
+            let result = async {
+                match command {
+                    VaultCommand::Set { account } => {
+                        use std::io::IsTerminal;
+                        let value = if std::io::stdin().is_terminal() {
+                            rpassword::prompt_password(format!("Secret for '{account}': "))?
+                        } else {
+                            let mut line = String::new();
+                            std::io::stdin().read_line(&mut line)?;
+                            line.trim_end_matches(['\n', '\r']).to_string()
+                        };
+                        if value.is_empty() {
+                            anyhow::bail!("empty secret; nothing stored");
+                        }
+                        vault.set(&account, &value)?;
+                        index.record_set(&account).await?;
+                        println!("stored '{account}' in the vault ({})", vault.backend());
+                        Ok(())
+                    }
+                    VaultCommand::Delete { account } => {
+                        let removed = vault.delete(&account)?;
+                        index.record_delete(&account).await?;
+                        println!(
+                            "{}",
+                            if removed {
+                                format!("deleted '{account}'")
+                            } else {
+                                format!("no secret '{account}' in the vault")
+                            }
+                        );
+                        Ok(())
+                    }
+                    VaultCommand::Has { account } => {
+                        println!(
+                            "{}: {}",
+                            account,
+                            if vault.get(&account)?.is_some() {
+                                "present"
+                            } else {
+                                "absent"
+                            }
+                        );
+                        Ok(())
+                    }
+                    VaultCommand::List => {
+                        let accounts = index.list().await?;
+                        if accounts.is_empty() {
+                            println!("(vault index is empty)");
+                        }
+                        for account in &accounts {
+                            println!("{account}");
+                        }
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            index.close().await;
+            result
         }
     }
 }
