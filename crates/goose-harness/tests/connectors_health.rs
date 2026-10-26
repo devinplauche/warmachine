@@ -10,16 +10,9 @@ use goose_harness::connectors::health_check;
 use goose_harness::vault::{MemoryVault, Vault};
 
 fn fixture_path() -> String {
-    // The fixture lives with the dogfood assets in the workspace.
-    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    // crates/goose-harness → crates → repo root → workspace dir.
-    let workspace = manifest
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .expect("workspace dir");
-    workspace
-        .join("wm-fixtures/fake_mcp_server.py")
+    // The fixture ships in the repo next to this test.
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/fake_mcp_server.py")
         .to_string_lossy()
         .to_string()
 }
@@ -40,11 +33,11 @@ fn def() -> ConnectorDef {
 
 #[tokio::test]
 async fn health_check_accepts_the_vault_token_and_rejects_a_wrong_one() {
-    if !std::path::Path::new(&fixture_path()).exists() {
-        // Fixture not present (e.g. CI without the workspace assets):
-        // the unit tests still cover assess/resolve; skip the spawn.
-        return;
-    }
+    assert!(
+        std::path::Path::new(&fixture_path()).exists(),
+        "fixture missing: {}",
+        fixture_path()
+    );
     let vault = MemoryVault::default();
 
     // No secret at all → health check refuses with the account name.
