@@ -1,4 +1,6 @@
 pub mod configure;
+#[cfg(feature = "harness")]
+pub mod daemon;
 pub mod doctor;
 pub mod gateway;
 pub mod info;

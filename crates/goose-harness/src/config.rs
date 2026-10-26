@@ -165,6 +165,10 @@ pub struct DaemonConfig {
     /// note (decision D6).
     pub webhook_bind: String,
     pub webhook_port: u16,
+    /// Named webhook triggers: firing `POST /trigger {"trigger": name}`
+    /// at the daemon runs the trigger's recipe as a ledger task.
+    #[serde(default)]
+    pub triggers: Vec<WebhookTrigger>,
 }
 
 impl Default for DaemonConfig {
@@ -172,8 +176,20 @@ impl Default for DaemonConfig {
         Self {
             webhook_bind: "127.0.0.1".to_string(),
             webhook_port: 8471,
+            triggers: Vec::new(),
         }
     }
+}
+
+/// One named webhook trigger (AC-3.2b).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebhookTrigger {
+    pub name: String,
+    /// Path to the recipe the trigger runs.
+    pub recipe: String,
+    /// Delivery-policy topic for this trigger's results.
+    pub topic: Option<String>,
 }
 
 /// Parse the `harness:` section out of a full config.yaml document.

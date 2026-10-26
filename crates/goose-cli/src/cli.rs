@@ -793,6 +793,34 @@ enum TasksCommand {
     },
 }
 
+/// Daemon commands (harness builds only).
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum DaemonCommand {
+    /// Run the daemon in the foreground (scheduler + webhook + delivery)
+    #[command(about = "Run the daemon in the foreground")]
+    Run,
+    /// Show the running daemon's state
+    #[command(about = "Show the running daemon's state")]
+    Status,
+    /// Stop the running daemon
+    #[command(about = "Stop the running daemon")]
+    Stop,
+    /// Print the systemd user unit for the daemon
+    #[command(about = "Print the systemd user unit")]
+    Unit,
+}
+
+#[cfg(feature = "harness")]
+async fn handle_daemon_command(command: DaemonCommand) -> Result<()> {
+    match command {
+        DaemonCommand::Run => crate::commands::daemon::run_daemon().await,
+        DaemonCommand::Status => crate::commands::daemon::daemon_status().await,
+        DaemonCommand::Stop => crate::commands::daemon::daemon_stop().await,
+        DaemonCommand::Unit => crate::commands::daemon::daemon_unit(),
+    }
+}
+
 /// On-prem audit log commands (only compiled in the on-prem build).
 #[cfg(feature = "onprem")]
 #[derive(Subcommand)]
@@ -1243,6 +1271,14 @@ enum Command {
         command: HarnessCommand,
     },
 
+    /// Run and inspect the harness daemon (scheduler + triggers + delivery)
+    #[cfg(feature = "harness")]
+    #[command(about = "Run and inspect the harness daemon")]
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
+
     /// Manage gateways for external platform integrations (e.g., Telegram)
     #[command(
         about = "Manage gateways for external platform integrations",
@@ -1618,6 +1654,8 @@ fn get_command_name(command: &Option<Command>) -> &'static str {
         Some(Command::Schedule { .. }) => "schedule",
         #[cfg(feature = "harness")]
         Some(Command::Harness { .. }) => "harness",
+        #[cfg(feature = "harness")]
+        Some(Command::Daemon { .. }) => "daemon",
         #[cfg(feature = "update")]
         Some(Command::Update { .. }) => "update",
         Some(Command::Recipe { .. }) => "recipe",
@@ -3498,6 +3536,8 @@ pub async fn cli() -> anyhow::Result<()> {
         Some(Command::Schedule { command }) => handle_schedule_command(command).await,
         #[cfg(feature = "harness")]
         Some(Command::Harness { command }) => handle_harness_command(command).await,
+        #[cfg(feature = "harness")]
+        Some(Command::Daemon { command }) => handle_daemon_command(command).await,
         #[cfg(feature = "update")]
         Some(Command::Update {
             canary,

@@ -400,6 +400,59 @@ impl TaskStore {
             .collect()
     }
 
+    /// Deliver one completed task's result, exactly once (AC-2.4).
+    /// The claim is a single atomic status update, so racing callers
+    /// cannot both send. A failed send reverts the claim and is
+    /// logged, so the result is not lost.
+    pub async fn deliver_one(
+        &self,
+        id: &str,
+        channel: &dyn DeliveryChannel,
+        actor: &str,
+    ) -> Result<DeliverOutcome> {
+        let task = self.get(id).await?.ok_or_else(|| anyhow!("no task {id}"))?;
+        if task.status != TaskStatus::Done {
+            return Ok(DeliverOutcome::NotDone);
+        }
+        // Atomic claim: exactly one deliverer can win this update.
+        let claimed = sqlx::query(
+            "UPDATE tasks SET status = 'delivered', updated_at = ? WHERE id = ? AND status = 'done'",
+        )
+        .bind(Utc::now().to_rfc3339())
+        .bind(id)
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+        if claimed == 0 {
+            return Ok(DeliverOutcome::NotDone);
+        }
+        let mut tx = self.pool.begin().await?;
+        Self::log(&mut tx, id, actor, "delivery_claimed", Some(channel.name())).await?;
+        tx.commit().await?;
+
+        match channel.send(&task).await {
+            Ok(receipt) => {
+                let mut tx = self.pool.begin().await?;
+                Self::log(&mut tx, id, actor, "delivered", Some(&receipt)).await?;
+                tx.commit().await?;
+                Ok(DeliverOutcome::Delivered)
+            }
+            Err(e) => {
+                // Revert the claim so the result is not lost; the
+                // task returns to done and can be delivered later.
+                sqlx::query("UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?")
+                    .bind(Utc::now().to_rfc3339())
+                    .bind(id)
+                    .execute(&self.pool)
+                    .await?;
+                let mut tx = self.pool.begin().await?;
+                Self::log(&mut tx, id, actor, "delivery_failed", Some(&e.to_string())).await?;
+                tx.commit().await?;
+                Ok(DeliverOutcome::Failed(e.to_string()))
+            }
+        }
+    }
+
     /// Deliver every `done` task's result through the channel,
     /// exactly once each (AC-2.3, AC-2.4).
     pub async fn deliver_pending(
@@ -409,56 +462,10 @@ impl TaskStore {
     ) -> Result<DeliveryReport> {
         let mut report = DeliveryReport::default();
         for task in self.list(Some(TaskStatus::Done), None, false).await? {
-            // Atomic claim: exactly one deliverer can win this update.
-            let claimed = sqlx::query(
-                "UPDATE tasks SET status = 'delivered', updated_at = ? WHERE id = ? AND status = 'done'",
-            )
-            .bind(Utc::now().to_rfc3339())
-            .bind(&task.id)
-            .execute(&self.pool)
-            .await?
-            .rows_affected();
-            if claimed == 0 {
-                continue;
-            }
-            let mut tx = self.pool.begin().await?;
-            Self::log(
-                &mut tx,
-                &task.id,
-                actor,
-                "delivery_claimed",
-                Some(channel.name()),
-            )
-            .await?;
-            tx.commit().await?;
-
-            match channel.send(&task).await {
-                Ok(receipt) => {
-                    let mut tx = self.pool.begin().await?;
-                    Self::log(&mut tx, &task.id, actor, "delivered", Some(&receipt)).await?;
-                    tx.commit().await?;
-                    report.delivered.push(task.id.clone());
-                }
-                Err(e) => {
-                    // Revert the claim so the result is not lost; the
-                    // task returns to done and can be delivered later.
-                    sqlx::query("UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?")
-                        .bind(Utc::now().to_rfc3339())
-                        .bind(&task.id)
-                        .execute(&self.pool)
-                        .await?;
-                    let mut tx = self.pool.begin().await?;
-                    Self::log(
-                        &mut tx,
-                        &task.id,
-                        actor,
-                        "delivery_failed",
-                        Some(&e.to_string()),
-                    )
-                    .await?;
-                    tx.commit().await?;
-                    report.failed.push((task.id.clone(), e.to_string()));
-                }
+            match self.deliver_one(&task.id, channel, actor).await? {
+                DeliverOutcome::Delivered => report.delivered.push(task.id.clone()),
+                DeliverOutcome::Failed(error) => report.failed.push((task.id.clone(), error)),
+                DeliverOutcome::NotDone => {}
             }
         }
         Ok(report)
@@ -492,6 +499,15 @@ fn task_from_row(row: &SqliteRow) -> Result<Task> {
 pub struct DeliveryReport {
     pub delivered: Vec<String>,
     pub failed: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DeliverOutcome {
+    Delivered,
+    /// The task was not awaiting delivery (or a racing caller claimed it).
+    NotDone,
+    /// The channel send failed; the claim was reverted.
+    Failed(String),
 }
 
 /// Where completed task results go. The daemon and gateway channels

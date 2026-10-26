@@ -128,3 +128,84 @@ here; implemented in Phase 3.
   Phase 5 kickoff.
 - Whether the desktop app gets task/worker UI in this project — the
   criteria require CLI visibility; desktop UI is a follow-up project.
+
+## Phase 3 addendum — the daemon
+
+`warmachine daemon run` is the long-lived harness process. It hosts
+the existing recipe scheduler (cron jobs run while the daemon lives),
+serves the loopback webhook trigger, dispatches trigger runs as
+ledger tasks, and delivers completed task results through the
+delivery policy.
+
+### Operations
+
+- `warmachine daemon run` — foreground; log to stdout.
+- `warmachine daemon status` — pid, triggers, scheduler job count,
+  and open/failed/pending-delivery task counts, from the heartbeat
+  state file (`daemon-state.json` in the config dir; heartbeats every
+  30 s — a state older than 90 s is reported as stale).
+- `warmachine daemon stop` — SIGTERM to the recorded pid.
+- `warmachine daemon unit` — prints the systemd user unit below.
+
+### systemd user unit
+
+```ini
+[Unit]
+Description=WarMachine harness daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/warmachine daemon run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Install: save as `~/.config/systemd/user/warmachine-daemon.service`,
+then `systemctl --user daemon-reload && systemctl --user enable --now
+warmachine-daemon`. `loginctl enable-linger $USER` keeps it running
+across logout.
+
+### Webhook trigger
+
+Configured under `harness.daemon.triggers` in config.yaml:
+
+```yaml
+harness:
+  daemon:
+    triggers:
+      - name: ci-watch
+        recipe: /path/to/triage.yaml
+        topic: ci
+```
+
+Fire it with:
+
+```sh
+curl -X POST http://127.0.0.1:8471/trigger \
+  -H "X-Harness-Token: $(cat <config-dir>/daemon.token)" \
+  -d '{"trigger": "ci-watch"}'
+```
+
+The listener is loopback-only (a non-loopback `webhook_bind` is
+refused at startup). The token lives in an owner-only file
+(`daemon.token`, mode 0600) in the config dir until the Phase 5
+credential vault lands. Responses: 202 + the ledger task id when the
+run is accepted, 409 when the same trigger is already running (a
+trigger never runs twice concurrently), 401 on a bad token, 404 on an
+unknown trigger. `GET /health` answers unauthenticated for local
+monitoring.
+
+### Delivery policy
+
+Every proactive delivery passes `DeliveryPolicy` first: master
+switch, quiet hours (local time, default 22:00–07:00), per-topic
+opt-outs, and a 24 h dedupe window keyed per item. Every decision —
+allow or deny — is appended to the `delivery_log` table in
+`harness.db` with its reason. Denied task results stay in the ledger
+as `done` and are retried on the next 30 s tick; nothing is dropped
+silently, and the atomic claim in the ledger keeps delivery
+exactly-once.

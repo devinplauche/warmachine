@@ -9,17 +9,22 @@
 //! own phase, gated by the project's acceptance criteria.
 
 pub mod config;
+pub mod daemon;
 pub mod ledger;
 pub mod memory;
+pub mod policy;
 
 pub use config::{
     ActionClass, ActionClasses, DaemonConfig, DeliveryConfig, HarnessConfig, MemoryConfig,
+    WebhookTrigger,
 };
+pub use daemon::{TriggerGuard, TriggerPermit};
 pub use ledger::{
-    DeliveryChannel, DeliveryReport, FileDeliveryChannel, NewTask, Task, TaskEvent, TaskStatus,
-    TaskStore,
+    DeliverOutcome, DeliveryChannel, DeliveryReport, FileDeliveryChannel, NewTask, Task, TaskEvent,
+    TaskStatus, TaskStore,
 };
 pub use memory::{
     consolidate, extract_candidates, ConsolidationReport, MemoryKind, MemoryRecord, MemoryStore,
     NewRecord, RecordStatus, WritePolicy,
 };
+pub use policy::{Decision, DeliveryLog, DeliveryPolicy, DenyReason};
