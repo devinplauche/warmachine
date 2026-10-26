@@ -642,6 +642,29 @@ async fn run_trigger(
     }
     .await;
     let _ = scheduler.remove_scheduled_job(&job_id, true).await;
+    // The scheduler's execute_job swallows agent-stream errors and
+    // returns Ok(session) even when the provider failed before any
+    // reply (dead endpoint, model OOM). A run that consumed no
+    // tokens never reached the model — report it as failed rather
+    // than finished, or the ledger lies about background work.
+    let outcome = match outcome {
+        Ok(session) => {
+            let tokens = warmachine::session::SessionManager::instance()
+                .get_session(&session, false)
+                .await
+                .map(|s| s.usage.total_tokens.unwrap_or(0))
+                .unwrap_or(0);
+            if tokens == 0 {
+                Err(anyhow::anyhow!(
+                    "agent run produced no model output (session {session}); \
+                     check the provider — the run likely failed before the first reply"
+                ))
+            } else {
+                Ok(session)
+            }
+        }
+        other => other,
+    };
     match outcome {
         Ok(session) => {
             let _ = store
