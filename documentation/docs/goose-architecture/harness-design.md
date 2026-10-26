@@ -209,3 +209,56 @@ allow or deny — is appended to the `delivery_log` table in
 as `done` and are retried on the next 30 s tick; nothing is dropped
 silently, and the atomic claim in the ledger keeps delivery
 exactly-once.
+
+## Phase 4 addendum — approvals & audit
+
+### Approval queue
+
+Approval-required actions in background runs are queued in the
+`approval_requests` table (harness.db): action, class, origin, full
+arguments, expiry. The requesting run polls the queue; the user
+answers from any surface (`warmachine harness approvals
+list|show|approve|deny`). Unanswered requests expire into denials —
+default-deny on timeout — and a late decision cannot resurrect an
+expired or decided request (decisions are guarded by a
+`status = 'pending'` update).
+
+### The gate
+
+Enforcement sits in `ExtensionManager::dispatch_tool_call_inner`,
+the single funnel both reply engines pass through before a tool
+executes. Sessions whose type is `Scheduled` (every scheduler- or
+daemon-dispatched run) are classified by tool name:
+
+- forbidden → denied outright, audited;
+- auto-approved → allowed, audited;
+- approval-required → queued; the call waits for the decision.
+
+Interactive sessions are never gated; they keep the in-band
+permission flow. A session whose type cannot be resolved is treated
+as interactive, so a lookup failure can never deadlock a live user
+session behind the queue.
+
+### Audit
+
+`harness audit list|verify` reads a hash-chained NDJSON log in the
+config dir. Entry format and chain math are byte-identical to the
+on-prem build's audit component (same canonical string, same
+GENESIS start), so a log from either build verifies under the
+other's rules; format test vectors pin this.
+
+One plan item narrowed on contact with the code: D5 proposed
+extracting onprem's audit into goose-harness for shared use. The
+on-prem build compiles the harness crate out by design (AC-7), so
+it cannot link this module. The shared contract is the format —
+implemented twice, pinned by vectors — not shared code. Rotation
+and checkpoint files remain on-prem-only operational concerns.
+
+### Critical-job alerts
+
+Triggers marked `critical: true` alert on failure: primary channel
+first (default `deliveries.md`, override
+`harness.delivery.alert_primary_path`), fallback on failure
+(default `alerts.md`, override `alert_fallback_path`). Attempts are
+audit events: `alert_delivered`, `alert_primary_failed`,
+`alert_fallback_used`.

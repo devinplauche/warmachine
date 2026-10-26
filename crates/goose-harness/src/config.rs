@@ -24,6 +24,24 @@ pub struct HarnessConfig {
     pub delivery: DeliveryConfig,
     pub memory: MemoryConfig,
     pub daemon: DaemonConfig,
+    pub approvals: ApprovalsConfig,
+}
+
+/// Async approval queue settings (AC-4).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ApprovalsConfig {
+    /// Minutes an approval request stays live before it expires into
+    /// a denial (default-deny on timeout).
+    pub default_expiry_minutes: u64,
+}
+
+impl Default for ApprovalsConfig {
+    fn default() -> Self {
+        Self {
+            default_expiry_minutes: 60,
+        }
+    }
 }
 
 /// Tool-name pattern lists per action class, plus the class applied when
@@ -126,6 +144,11 @@ pub struct DeliveryConfig {
     pub quiet_hours_end: Option<String>,
     /// Topics the user has opted out of entirely.
     pub topic_opt_outs: Vec<String>,
+    /// Where critical-job failure alerts go first, and where they go
+    /// when the primary path fails (AC-4.5). Paths to files; unset
+    /// means deliveries.md / alerts.md in the config dir.
+    pub alert_primary_path: Option<String>,
+    pub alert_fallback_path: Option<String>,
 }
 
 impl Default for DeliveryConfig {
@@ -135,6 +158,8 @@ impl Default for DeliveryConfig {
             quiet_hours_start: Some("22:00".to_string()),
             quiet_hours_end: Some("07:00".to_string()),
             topic_opt_outs: Vec::new(),
+            alert_primary_path: None,
+            alert_fallback_path: None,
         }
     }
 }
@@ -190,6 +215,10 @@ pub struct WebhookTrigger {
     pub recipe: String,
     /// Delivery-policy topic for this trigger's results.
     pub topic: Option<String>,
+    /// Critical jobs get failure alerts through the fallback channel
+    /// when the primary is down (AC-4.5).
+    #[serde(default)]
+    pub critical: bool,
 }
 
 /// Parse the `harness:` section out of a full config.yaml document.

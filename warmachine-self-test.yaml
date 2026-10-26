@@ -14,6 +14,8 @@ activities:
   - Test extension discovery and management
   - Test harness long-term memory (write a fact, confirm it appears in a new session's brief, supersede it, delete it)
   - Test load tool for knowledge injection and discovery
+  - type: text
+    content: "Test harness approvals and audit (queue an approval request with `warmachine harness approvals request`, approve it from a second terminal, confirm `warmachine harness audit verify` passes)"
   - Test delegate tool for task delegation (sync and async)
   - Test multi-turn thinking preservation for providers that reject replayed reasoning_content
   - Test Z.AI Coding Plan streamed tool calls and interruption recovery

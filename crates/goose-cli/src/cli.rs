@@ -647,6 +647,84 @@ enum HarnessCommand {
         /// Path to the transcript text file
         path: std::path::PathBuf,
     },
+    /// Inspect and decide queued approval requests
+    #[command(about = "Inspect and decide queued approval requests")]
+    Approvals {
+        #[command(subcommand)]
+        command: ApprovalsCommand,
+    },
+    /// Inspect and verify the hash-chained audit log
+    #[command(about = "Inspect and verify the hash-chained audit log")]
+    Audit {
+        #[command(subcommand)]
+        command: HarnessAuditCommand,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum ApprovalsCommand {
+    /// List approval requests
+    #[command(about = "List approval requests")]
+    List {
+        /// Status filter: pending, approved, denied, expired
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Show one approval request
+    #[command(about = "Show one approval request")]
+    Show {
+        /// Request id
+        id: String,
+    },
+    /// Approve a pending request
+    #[command(about = "Approve a pending request")]
+    Approve {
+        /// Request id
+        id: String,
+        /// Decision note
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Deny a pending request
+    #[command(about = "Deny a pending request")]
+    Deny {
+        /// Request id
+        id: String,
+        /// Decision note
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Queue a new approval request (for scripts and scheduled jobs)
+    #[command(about = "Queue a new approval request")]
+    Request {
+        /// Action name (usually the tool name)
+        action: String,
+        /// Who is asking (e.g. scheduler:esbd-scan)
+        #[arg(long, default_value = "cli")]
+        origin: String,
+        /// Arguments as JSON
+        #[arg(long, default_value = "{}")]
+        args: String,
+        /// Minutes before the request expires into a denial
+        #[arg(long)]
+        expiry_minutes: Option<u64>,
+    },
+}
+
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+enum HarnessAuditCommand {
+    /// Show the most recent audit entries
+    #[command(about = "Show the most recent audit entries")]
+    List {
+        /// How many entries to show
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Verify the hash chain end to end
+    #[command(about = "Verify the hash chain")]
+    Verify,
 }
 
 #[cfg(feature = "harness")]
@@ -2508,6 +2586,151 @@ async fn handle_harness_command(command: HarnessCommand) -> Result<()> {
             .await;
             store.close().await;
             result
+        }
+        HarnessCommand::Approvals { command } => {
+            use warmachine::harness::{ApprovalStatus, ApprovalStore};
+
+            let db_path = warmachine::config::paths::Paths::in_config_dir("harness.db");
+            let audit_path = warmachine::config::paths::Paths::in_config_dir("audit.log");
+            let store = ApprovalStore::open(&db_path).await?;
+
+            fn print_request(request: &warmachine::harness::ApprovalRequest) {
+                println!(
+                    "{} [{}] {} (class {}, from {})",
+                    request.id,
+                    request.status.as_str(),
+                    request.action,
+                    request.action_class,
+                    request.origin
+                );
+                println!("  args: {}", request.args_json);
+                println!(
+                    "  created {}, expires {}",
+                    request.created_at.format("%Y-%m-%d %H:%M UTC"),
+                    request.expires_at.format("%Y-%m-%d %H:%M UTC")
+                );
+                if let Some(by) = &request.decided_by {
+                    println!(
+                        "  decided by {by}{}",
+                        request
+                            .note
+                            .as_ref()
+                            .map(|n| format!(" — {n}"))
+                            .unwrap_or_default()
+                    );
+                }
+            }
+
+            let result = async {
+                match command {
+                    ApprovalsCommand::List { status } => {
+                        let status = match status.as_deref() {
+                            None => None,
+                            Some(other) => Some(ApprovalStatus::from_str(other)?),
+                        };
+                        let requests = store.list(status).await?;
+                        if requests.is_empty() {
+                            println!("(no approval requests)");
+                        }
+                        for request in &requests {
+                            print_request(request);
+                        }
+                        Ok(())
+                    }
+                    ApprovalsCommand::Show { id } => {
+                        let request = store
+                            .get(&id)
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("no approval request {id}"))?;
+                        print_request(&request);
+                        Ok(())
+                    }
+                    ApprovalsCommand::Approve { id, note } => {
+                        let request = store.decide(&id, true, "cli", note.as_deref()).await?;
+                        print_request(&request);
+                        let _ = warmachine::harness::audit::append(
+                            &audit_path,
+                            "approval_decided",
+                            "",
+                            serde_json::json!({"approval_id": id, "decision": "approved", "by": "cli"}),
+                        );
+                        Ok(())
+                    }
+                    ApprovalsCommand::Deny { id, note } => {
+                        let request = store.decide(&id, false, "cli", note.as_deref()).await?;
+                        print_request(&request);
+                        let _ = warmachine::harness::audit::append(
+                            &audit_path,
+                            "approval_decided",
+                            "",
+                            serde_json::json!({"approval_id": id, "decision": "denied", "by": "cli"}),
+                        );
+                        Ok(())
+                    }
+                    ApprovalsCommand::Request {
+                        action,
+                        origin,
+                        args,
+                        expiry_minutes,
+                    } => {
+                        // Validate the args are JSON before queueing.
+                        let _: serde_json::Value = serde_json::from_str(&args)
+                            .map_err(|e| anyhow::anyhow!("--args must be valid JSON: {e}"))?;
+                        let (config, _) = load_harness_config()?;
+                        let ttl =
+                            expiry_minutes.unwrap_or(config.approvals.default_expiry_minutes);
+                        let request = store
+                            .create(&action, "approval_required", &origin, &args, ttl)
+                            .await?;
+                        let _ = warmachine::harness::audit::append(
+                            &audit_path,
+                            "approval_requested",
+                            "",
+                            serde_json::json!({"approval_id": request.id, "action": action, "origin": origin}),
+                        );
+                        print_request(&request);
+                        Ok(())
+                    }
+                }
+            }
+            .await;
+            store.close().await;
+            result
+        }
+        HarnessCommand::Audit { command } => {
+            let audit_path = warmachine::config::paths::Paths::in_config_dir("audit.log");
+            match command {
+                HarnessAuditCommand::Verify => {
+                    let report = warmachine::harness::audit::verify(&audit_path)?;
+                    println!(
+                        "audit chain OK: {} entries verified, {} non-monotonic timestamps",
+                        report.entries, report.non_monotonic_timestamps
+                    );
+                    Ok(())
+                }
+                HarnessAuditCommand::List { limit } => {
+                    let entries = warmachine::harness::audit::tail(&audit_path, limit)?;
+                    if entries.is_empty() {
+                        println!("(audit log is empty)");
+                    }
+                    for entry in &entries {
+                        println!(
+                            "{} {} session={} {}",
+                            entry.get("ts").and_then(|v| v.as_str()).unwrap_or("?"),
+                            entry.get("event").and_then(|v| v.as_str()).unwrap_or("?"),
+                            entry
+                                .get("session_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(""),
+                            entry
+                                .get("details")
+                                .map(|d| d.to_string())
+                                .unwrap_or_default()
+                        );
+                    }
+                    Ok(())
+                }
+            }
         }
     }
 }

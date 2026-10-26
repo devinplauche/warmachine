@@ -8,15 +8,19 @@
 //! capability lands behind the core crate's `harness` feature in its
 //! own phase, gated by the project's acceptance criteria.
 
+pub mod approvals;
+pub mod audit;
 pub mod config;
 pub mod daemon;
 pub mod ledger;
 pub mod memory;
 pub mod policy;
 
+pub use approvals::{ApprovalRequest, ApprovalStatus, ApprovalStore};
+pub use audit::VerifyReport as AuditVerifyReport;
 pub use config::{
-    ActionClass, ActionClasses, DaemonConfig, DeliveryConfig, HarnessConfig, MemoryConfig,
-    WebhookTrigger,
+    ActionClass, ActionClasses, ApprovalsConfig, DaemonConfig, DeliveryConfig, HarnessConfig,
+    MemoryConfig, WebhookTrigger,
 };
 pub use daemon::{TriggerGuard, TriggerPermit};
 pub use ledger::{

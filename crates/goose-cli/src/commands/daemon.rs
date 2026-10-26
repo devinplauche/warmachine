@@ -16,8 +16,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use warmachine::config::paths::Paths;
 use warmachine::harness::{
-    Decision, DeliverOutcome, DeliveryLog, DeliveryPolicy, FileDeliveryChannel, HarnessConfig,
-    NewTask, TaskStatus, TaskStore, TriggerGuard, WebhookTrigger,
+    ApprovalStore, Decision, DeliverOutcome, DeliveryLog, DeliveryPolicy, FileDeliveryChannel,
+    HarnessConfig, NewTask, Task, TaskStatus, TaskStore, TriggerGuard, WebhookTrigger,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,7 +91,21 @@ pub async fn run_daemon() -> Result<()> {
 
     let db_path = Paths::in_config_dir("harness.db");
     let store = Arc::new(TaskStore::open(&db_path).await?);
+    let approvals = Arc::new(ApprovalStore::open(&db_path).await?);
     let delivery_log = Arc::new(DeliveryLog::open(&db_path).await?);
+    let audit_path = Paths::in_config_dir("audit.log");
+    let alert_primary = config
+        .delivery
+        .alert_primary_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(deliveries_path);
+    let alert_fallback = config
+        .delivery
+        .alert_fallback_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Paths::in_config_dir("alerts.md"));
     let policy = Arc::new(DeliveryPolicy::new(config.delivery.clone()));
     let guard = Arc::new(TriggerGuard::new());
     let triggers: Arc<Vec<WebhookTrigger>> = Arc::new(config.daemon.triggers.clone());
@@ -148,6 +162,9 @@ pub async fn run_daemon() -> Result<()> {
         let guard = guard.clone();
         let triggers = triggers.clone();
         let token = token.clone();
+        let audit_path = audit_path.clone();
+        let alert_primary = alert_primary.clone();
+        let alert_fallback = alert_fallback.clone();
         #[cfg(feature = "scheduler")]
         let scheduler = scheduler.clone();
         tokio::spawn(async move {
@@ -160,6 +177,9 @@ pub async fn run_daemon() -> Result<()> {
                     guard: guard.clone(),
                     triggers: triggers.clone(),
                     token: token.clone(),
+                    audit_path: audit_path.clone(),
+                    alert_primary: alert_primary.clone(),
+                    alert_fallback: alert_fallback.clone(),
                     #[cfg(feature = "scheduler")]
                     scheduler: scheduler.clone(),
                 };
@@ -196,7 +216,24 @@ pub async fn run_daemon() -> Result<()> {
                 break;
             }
             _ = tick.tick() => {
-                deliver_due(&store, &delivery_log, &policy, &triggers).await;
+                // Surface approval expiries promptly (AC-4.2): the
+                // requesting run also sees the denial on its next
+                // poll via lazy expiry, but the audit entry is the
+                // user's record that it happened.
+                match approvals.expire_due().await {
+                    Ok(expired) => {
+                        for id in expired {
+                            let _ = warmachine::harness::audit::append(
+                                &audit_path,
+                                "approval_expired",
+                                "",
+                                serde_json::json!({"approval_id": id}),
+                            );
+                        }
+                    }
+                    Err(e) => eprintln!("approval sweep error: {e}"),
+                }
+                deliver_due(&store, &delivery_log, &policy, &triggers, &audit_path).await;
                 #[cfg(feature = "scheduler")]
                 let scheduler_jobs = match &scheduler {
                     Some(s) => s.list_scheduled_jobs().await.len(),
@@ -253,6 +290,7 @@ async fn deliver_due(
     delivery_log: &Arc<DeliveryLog>,
     policy: &Arc<DeliveryPolicy>,
     triggers: &[WebhookTrigger],
+    audit_path: &std::path::Path,
 ) {
     let Ok(done) = store.list(Some(TaskStatus::Done), None, false).await else {
         return;
@@ -273,12 +311,20 @@ async fn deliver_due(
             .and_then(|t| t.topic.as_deref());
         match policy.check_and_log(delivery_log, topic, &task.id).await {
             Ok(Decision::Allow) => match store.deliver_one(&task.id, &channel, "daemon").await {
+                Ok(DeliverOutcome::Delivered) => {
+                    let _ = warmachine::harness::audit::append(
+                        audit_path,
+                        "delivery",
+                        "",
+                        serde_json::json!({"task_id": task.id, "channel": "file"}),
+                    );
+                }
                 Ok(DeliverOutcome::Failed(error)) => {
                     let _ = delivery_log
                         .record(topic, &task.id, "send_failed", Some(&error))
                         .await;
                 }
-                Ok(_) => {}
+                Ok(DeliverOutcome::NotDone) => {}
                 Err(e) => eprintln!("delivery error for {}: {e}", task.id),
             },
             Ok(Decision::Deny(_)) => {
@@ -294,6 +340,9 @@ struct ConnCtx {
     guard: Arc<TriggerGuard>,
     triggers: Arc<Vec<WebhookTrigger>>,
     token: Arc<String>,
+    audit_path: PathBuf,
+    alert_primary: PathBuf,
+    alert_fallback: PathBuf,
     #[cfg(feature = "scheduler")]
     scheduler: Option<Arc<warmachine::scheduler::Scheduler>>,
 }
@@ -427,22 +476,112 @@ async fn route(
         Err(e) => return (400, format!("{{\"error\":\"ledger error: {e}\"}}")),
     };
     let _ = ctx.store.start(&task.id, "daemon").await;
+    let _ = warmachine::harness::audit::append(
+        &ctx.audit_path,
+        "trigger_fire",
+        "",
+        serde_json::json!({"trigger": trigger.name, "task_id": task.id}),
+    );
     let trigger = trigger.clone();
     #[cfg(feature = "scheduler")]
     let scheduler = ctx.scheduler.clone();
     let store = ctx.store.clone();
     let task_id = task.id.clone();
+    let audit_path = ctx.audit_path.clone();
+    let alert_primary = ctx.alert_primary.clone();
+    let alert_fallback = ctx.alert_fallback.clone();
     tokio::spawn(async move {
         let _permit = permit;
         #[cfg(feature = "scheduler")]
-        run_trigger(store, scheduler, trigger, task_id).await;
+        run_trigger(
+            store,
+            scheduler,
+            trigger,
+            task_id,
+            audit_path,
+            alert_primary,
+            alert_fallback,
+        )
+        .await;
         #[cfg(not(feature = "scheduler"))]
-        run_trigger(store, trigger, task_id).await;
+        run_trigger(
+            store,
+            trigger,
+            task_id,
+            audit_path,
+            alert_primary,
+            alert_fallback,
+        )
+        .await;
     });
     (
         202,
         format!("{{\"status\":\"accepted\",\"task_id\":\"{}\"}}", task.id),
     )
+}
+
+/// Critical-job failure alert (AC-4.5): try the primary channel;
+/// if it is down, fall back and log the fallback in the audit log.
+async fn alert_critical_failure(
+    trigger: &WebhookTrigger,
+    task_id: &str,
+    error: &str,
+    audit_path: &std::path::Path,
+    primary: &std::path::Path,
+    fallback: &std::path::Path,
+) {
+    use warmachine::harness::DeliveryChannel;
+    let now = chrono::Utc::now();
+    let alert = Task {
+        id: format!("alert:{task_id}"),
+        title: format!("CRITICAL job failed: {}", trigger.name),
+        owner: format!("trigger:{}", trigger.name),
+        status: TaskStatus::Failed,
+        next_step: None,
+        deadline: None,
+        result: Some(error.to_string()),
+        created_at: now,
+        updated_at: now,
+    };
+    let primary_channel = FileDeliveryChannel {
+        path: primary.to_path_buf(),
+    };
+    match primary_channel.send(&alert).await {
+        Ok(_) => {
+            let _ = warmachine::harness::audit::append(
+                audit_path,
+                "alert_delivered",
+                "",
+                serde_json::json!({"task_id": task_id, "channel": "primary"}),
+            );
+        }
+        Err(primary_error) => {
+            let _ = warmachine::harness::audit::append(
+                audit_path,
+                "alert_primary_failed",
+                "",
+                serde_json::json!({"task_id": task_id, "error": primary_error.to_string()}),
+            );
+            let fallback_channel = FileDeliveryChannel {
+                path: fallback.to_path_buf(),
+            };
+            match fallback_channel.send(&alert).await {
+                Ok(_) => {
+                    let _ = warmachine::harness::audit::append(
+                        audit_path,
+                        "alert_fallback_used",
+                        "",
+                        serde_json::json!({"task_id": task_id, "channel": "fallback"}),
+                    );
+                }
+                Err(fallback_error) => {
+                    eprintln!(
+                        "critical alert for task {task_id} failed on both channels: {primary_error}; {fallback_error}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[cfg(feature = "scheduler")]
@@ -451,11 +590,24 @@ async fn run_trigger(
     scheduler: Option<Arc<warmachine::scheduler::Scheduler>>,
     trigger: WebhookTrigger,
     task_id: String,
+    audit_path: PathBuf,
+    alert_primary: PathBuf,
+    alert_fallback: PathBuf,
 ) {
     let Some(scheduler) = scheduler else {
-        let _ = store
-            .fail(&task_id, "scheduler not available in this build", "daemon")
+        let error = "scheduler not available in this build";
+        let _ = store.fail(&task_id, error, "daemon").await;
+        if trigger.critical {
+            alert_critical_failure(
+                &trigger,
+                &task_id,
+                error,
+                &audit_path,
+                &alert_primary,
+                &alert_fallback,
+            )
             .await;
+        }
         return;
     };
     let job_id = format!(
@@ -502,16 +654,43 @@ async fn run_trigger(
         }
         Err(e) => {
             let _ = store.fail(&task_id, &e.to_string(), "daemon").await;
+            if trigger.critical {
+                alert_critical_failure(
+                    &trigger,
+                    &task_id,
+                    &e.to_string(),
+                    &audit_path,
+                    &alert_primary,
+                    &alert_fallback,
+                )
+                .await;
+            }
         }
     }
 }
 
 #[cfg(not(feature = "scheduler"))]
-async fn run_trigger(store: Arc<TaskStore>, trigger: WebhookTrigger, task_id: String) {
-    let _ = trigger;
-    let _ = store
-        .fail(&task_id, "scheduler not available in this build", "daemon")
+async fn run_trigger(
+    store: Arc<TaskStore>,
+    trigger: WebhookTrigger,
+    task_id: String,
+    audit_path: PathBuf,
+    alert_primary: PathBuf,
+    alert_fallback: PathBuf,
+) {
+    let error = "scheduler not available in this build";
+    let _ = store.fail(&task_id, error, "daemon").await;
+    if trigger.critical {
+        alert_critical_failure(
+            &trigger,
+            &task_id,
+            error,
+            &audit_path,
+            &alert_primary,
+            &alert_fallback,
+        )
         .await;
+    }
 }
 
 pub async fn daemon_status() -> Result<()> {
