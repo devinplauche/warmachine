@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GENERIC, FICTIONAL example BOD. No proprietary schema.
+     Shape follows the common OAGIS pattern: root = Verb+Noun,
+     ApplicationArea = header, DataArea = verb + noun payload. -->
+<ProcessInventoryItem xmlns="http://example.com/bod-bridge/1.0">
+  <ApplicationArea>
+    <Sender>
+      <LogicalID>cpp-producer-01</LogicalID>
+      <ComponentID>warehouse-feed</ComponentID>
+    </Sender>
+    <CreationDateTime>2026-10-31T12:00:00Z</CreationDateTime>
+    <BODID>example-bod-0001</BODID>
+  </ApplicationArea>
+  <DataArea>
+    <Process>
+      <ActionCriteria>
+        <ActionExpression actionCode="Add">Add</ActionExpression>
+      </ActionCriteria>
+    </Process>
+    <InventoryItem>
+      <ItemID>ITEM-1001</ItemID>
+      <Description>Generic widget, blue</Description>
+      <QuantityOnHand>42</QuantityOnHand>
+      <LocationCode>WH-A3</LocationCode>
+      <StatusCode>Available</StatusCode>
+    </InventoryItem>
+  </DataArea>
+</ProcessInventoryItem>
